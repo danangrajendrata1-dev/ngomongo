@@ -12,7 +12,13 @@ class OpenAIRealtimeProvider(SpeechToTextProvider, TranslationProvider, TextToSp
         # TODO: integrate OpenAI realtime transcription when provider wiring is approved.
         return ""
 
-    async def translate(self, text: str, source_language: str, target_language: str) -> str:
+    async def translate_text(
+        self,
+        text: str,
+        source_language: str,
+        target_language: str,
+        mode: str,
+    ) -> str:
         # TODO: integrate OpenAI realtime translation when provider wiring is approved.
         return text
 

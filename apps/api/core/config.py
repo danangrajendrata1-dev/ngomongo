@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     openai_stt_model: str | None = Field(default=None, alias="OPENAI_STT_MODEL")
     openai_translation_model: str | None = Field(default=None, alias="OPENAI_TRANSLATION_MODEL")
+    use_translation_placeholder: bool = Field(default=False, alias="USE_TRANSLATION_PLACEHOLDER")
     openai_tts_model: str | None = Field(default=None, alias="OPENAI_TTS_MODEL")
     elevenlabs_api_key: str | None = Field(default=None, alias="ELEVENLABS_API_KEY")
     azure_speech_key: str | None = Field(default=None, alias="AZURE_SPEECH_KEY")

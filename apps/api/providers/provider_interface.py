@@ -16,7 +16,13 @@ class SpeechToTextProvider(ABC):
 
 class TranslationProvider(ABC):
     @abstractmethod
-    async def translate(self, text: str, source_language: str, target_language: str) -> str:
+    async def translate_text(
+        self,
+        text: str,
+        source_language: str,
+        target_language: str,
+        mode: str,
+    ) -> str:
         raise NotImplementedError
 
 

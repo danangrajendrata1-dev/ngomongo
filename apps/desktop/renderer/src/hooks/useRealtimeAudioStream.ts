@@ -13,7 +13,7 @@ type UseRealtimeAudioStreamArgs = {
 };
 
 type TranscriptMessage = Extract<RealtimeServerMessage, { type: 'transcript_partial' | 'transcript_final' }>;
-type TranslationMessage = Extract<RealtimeServerMessage, { type: 'translation_partial' }>;
+type TranslationMessage = Extract<RealtimeServerMessage, { type: 'translation_partial' | 'translation_final' }>;
 type TtsMessage = Extract<RealtimeServerMessage, { type: 'tts_placeholder' }>;
 type AckMessage = Extract<RealtimeServerMessage, { type: 'server_ack' }>;
 type OutputStatus = 'idle' | 'speaking';
@@ -117,7 +117,7 @@ export function useRealtimeAudioStream({ token }: UseRealtimeAudioStreamArgs) {
             setSttMode(message.type === 'transcript_partial' ? 'placeholder' : 'real');
           }
 
-          if (message.type === 'translation_partial') {
+          if (message.type === 'translation_partial' || message.type === 'translation_final') {
             appendTranslation(message);
           }
 

@@ -61,6 +61,16 @@ export type RealtimeServerMessage =
       is_final: false;
     }
   | {
+      type: 'translation_final';
+      chunk_index?: number;
+      original_text: string;
+      translated_text: string;
+      source_language: string;
+      target_language: string;
+      mode: string;
+      is_final: true;
+    }
+  | {
       type: 'tts_placeholder';
       chunk_index?: number;
       text: string;

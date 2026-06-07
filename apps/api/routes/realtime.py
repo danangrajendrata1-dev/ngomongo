@@ -21,7 +21,11 @@ from services.speech_to_text_service import (
     SpeechToTextServiceError,
 )
 from services.text_to_speech_service import TextToSpeechService
-from services.translation_service import TranslationService
+from services.translation_service import (
+    TranslationService,
+    TranslationServiceConfigurationError,
+    TranslationServiceError,
+)
 
 router = APIRouter(prefix="/realtime", tags=["realtime"])
 realtime_service = RealtimeTranslateService()
@@ -69,8 +73,8 @@ async def _send_followup_pipeline(
         transcript_event.get("chunk_index", "-"),
     )
 
-    translation_event = await translation_service.translate_partial_text(
-        text=str(transcript_event.get("text") or ''),
+    translation_event = await translation_service.translate_final_text(
+        text=str(transcript_event.get("text") or ""),
         source_language=source_language,
         target_language=target_language,
         mode=translation_mode,
@@ -78,7 +82,7 @@ async def _send_followup_pipeline(
     )
     await websocket.send_json(translation_event)
     logger.info(
-        "Translation partial sent: chunk_index=%s",
+        "Translation final sent: chunk_index=%s",
         translation_event.get("chunk_index", "-"),
     )
 
@@ -178,14 +182,23 @@ async def voice_socket(websocket: WebSocket) -> None:
             if payload.get("type") == "audio_chunk" and response.get("type") != "error":
                 source_language, target_language, translation_mode = _get_audio_metadata(payload)
                 transcript_event = await speech_to_text_service.process_audio_chunk(payload)
-                await _send_followup_pipeline(
-                    websocket,
-                    payload,
-                    transcript_event,
-                    source_language,
-                    target_language,
-                    translation_mode,
-                )
+                try:
+                    await _send_followup_pipeline(
+                        websocket,
+                        payload,
+                        transcript_event,
+                        source_language,
+                        target_language,
+                        translation_mode,
+                    )
+                except (TranslationServiceConfigurationError, TranslationServiceError) as exc:
+                    await websocket.send_json({
+                        "type": "error",
+                        "code": exc.code,
+                        "detail": str(exc),
+                        "message": str(exc),
+                    })
+                    continue
 
             if payload.get("type") == "audio_segment" and response.get("type") != "error":
                 source_language, target_language, translation_mode = _get_audio_metadata(payload)
@@ -216,14 +229,23 @@ async def voice_socket(websocket: WebSocket) -> None:
                     })
                     continue
 
-                await _send_followup_pipeline(
-                    websocket,
-                    payload,
-                    transcript_event,
-                    source_language,
-                    target_language,
-                    translation_mode,
-                )
+                try:
+                    await _send_followup_pipeline(
+                        websocket,
+                        payload,
+                        transcript_event,
+                        source_language,
+                        target_language,
+                        translation_mode,
+                    )
+                except (TranslationServiceConfigurationError, TranslationServiceError) as exc:
+                    await websocket.send_json({
+                        "type": "error",
+                        "code": exc.code,
+                        "detail": str(exc),
+                        "message": str(exc),
+                    })
+                    continue
 
             if response.get("type") == "session_stopped":
                 await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
