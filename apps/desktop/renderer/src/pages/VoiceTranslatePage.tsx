@@ -29,6 +29,9 @@ export function VoiceTranslatePage() {
     sourceStream: microphone.stream,
     isCapturing: microphone.isCapturing,
     isPaused: microphone.isPaused,
+    sourceLanguage: settings.source_language === 'English' ? 'en' : 'id',
+    targetLanguage: settings.target_language === 'English' ? 'en' : 'id',
+    translationMode: settings.translation_mode.toLowerCase(),
   });
   const [captureStatus, setCaptureStatus] = useState<CaptureStatus>('ready');
   const [statusMessage, setStatusMessage] = useState('Ready for local microphone capture.');
@@ -75,7 +78,7 @@ export function VoiceTranslatePage() {
       return 'paused';
     }
 
-    if (realtime.lastServerMessage && 'type' in realtime.lastServerMessage && realtime.lastServerMessage.type === 'transcript_partial') {
+    if (realtime.translationEvents.length > 0 || realtime.transcriptEvents.length > 0) {
       return 'processing';
     }
 
@@ -84,7 +87,31 @@ export function VoiceTranslatePage() {
     }
 
     return 'ready';
-  }, [captureStatus, realtime.lastServerMessage, realtime.realtimeError]);
+  }, [captureStatus, realtime.realtimeError, realtime.transcriptEvents.length, realtime.translationEvents.length]);
+
+  const statusLabel = useMemo(() => {
+    if (captureStatus === 'error') {
+      return statusMessage;
+    }
+
+    if (realtime.realtimeError) {
+      return realtime.realtimeError;
+    }
+
+    if (realtime.translationEvents.length > 0 || realtime.transcriptEvents.length > 0) {
+      return 'Processing transcript and translation placeholders.';
+    }
+
+    if (captureStatus === 'paused') {
+      return 'Paused';
+    }
+
+    if (captureStatus === 'listening') {
+      return 'Listening';
+    }
+
+    return 'Ready';
+  }, [captureStatus, realtime.realtimeError, realtime.transcriptEvents.length, realtime.translationEvents.length, statusMessage]);
 
   const handleStart = async () => {
     await realtime.disconnect();
@@ -122,11 +149,9 @@ export function VoiceTranslatePage() {
     error: 'danger',
   };
 
-  const lastAckMessage = realtime.lastServerMessage && 'type' in realtime.lastServerMessage && realtime.lastServerMessage.type === 'server_ack'
-    ? `Ack chunk #${realtime.lastServerMessage.chunk_index ?? '-'} received (${realtime.lastServerMessage.payload_size} bytes)`
-    : realtime.lastServerMessage
-      ? JSON.stringify(realtime.lastServerMessage)
-      : 'Belum ada respons server.';
+  const lastAckMessage = realtime.lastServerAck
+    ? `Ack chunk #${realtime.lastServerAck.chunk_index ?? '-'} received (${realtime.lastServerAck.payload_size} bytes)`
+    : 'Belum ada respons server.';
 
   return (
     <div className="page-grid page-grid--twoColumn">
@@ -192,17 +217,7 @@ export function VoiceTranslatePage() {
 
           <RealtimeStatus
             state={realtimeState}
-            message={captureStatus === 'error'
-              ? statusMessage
-              : realtime.realtimeError
-                ? realtime.realtimeError
-                : realtime.lastServerMessage && 'type' in realtime.lastServerMessage && realtime.lastServerMessage.type === 'transcript_partial'
-                  ? 'Processing transcript placeholder.'
-                  : captureStatus === 'paused'
-                    ? 'Paused'
-                    : captureStatus === 'listening'
-                      ? 'Listening'
-                      : 'Ready'}
+            message={statusLabel}
           />
 
           <p className={captureStatus === 'error' || realtime.realtimeError ? 'text-danger' : 'text-muted'}>
@@ -251,7 +266,7 @@ export function VoiceTranslatePage() {
 
       <TranslationPanel
         label="Translated transcript"
-        text="Translation will appear here..."
+        text={realtime.translationText || 'Translation will appear here...'}
       />
     </div>
   );

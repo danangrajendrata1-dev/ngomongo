@@ -15,10 +15,12 @@ from schemas.translation_schema import TranslationSessionRead, TranslationSessio
 from services.auth_service import AuthService
 from services.realtime_translate_service import RealtimeTranslateService
 from services.speech_to_text_service import SpeechToTextService
+from services.translation_service import TranslationService
 
 router = APIRouter(prefix="/realtime", tags=["realtime"])
 realtime_service = RealtimeTranslateService()
 speech_to_text_service = SpeechToTextService()
+translation_service = TranslationService()
 auth_service = AuthService()
 logger = logging.getLogger(__name__)
 
@@ -29,6 +31,13 @@ def _get_user_id(token: str) -> str:
     if not subject:
         raise UnauthorizedError()
     return str(subject)
+
+
+def _get_audio_metadata(payload: dict) -> tuple[str, str, str]:
+    source_language = str(payload.get("source_language") or "id")
+    target_language = str(payload.get("target_language") or "en")
+    translation_mode = str(payload.get("translation_mode") or "discord")
+    return source_language, target_language, translation_mode
 
 
 @router.post("/session/start", response_model=TranslationSessionRead, status_code=status.HTTP_201_CREATED)
@@ -112,11 +121,26 @@ async def voice_socket(websocket: WebSocket) -> None:
             logger.info("Realtime response sent: %s", response.get("type"))
 
             if payload.get("type") == "audio_chunk" and response.get("type") != "error":
+                source_language, target_language, translation_mode = _get_audio_metadata(payload)
+
                 transcript_event = await speech_to_text_service.process_audio_chunk(payload)
                 await websocket.send_json(transcript_event)
                 logger.info(
                     "Transcript partial sent: chunk_index=%s",
                     transcript_event.get("chunk_index", "-"),
+                )
+
+                translation_event = await translation_service.translate_partial_text(
+                    text=str(transcript_event.get("text") or ''),
+                    source_language=source_language,
+                    target_language=target_language,
+                    mode=translation_mode,
+                    chunk_index=transcript_event.get("chunk_index") if isinstance(transcript_event.get("chunk_index"), int) else None,
+                )
+                await websocket.send_json(translation_event)
+                logger.info(
+                    "Translation partial sent: chunk_index=%s",
+                    translation_event.get("chunk_index", "-"),
                 )
 
             if response.get("type") == "session_stopped":

@@ -23,6 +23,9 @@ function createAudioChunkPayload(
   analyser: AnalyserNode,
   sampleRate: number,
   chunkIndex: number,
+  sourceLanguage: string,
+  targetLanguage: string,
+  translationMode: string,
 ): RealtimeAudioChunkPayload {
   const data = new Uint8Array(analyser.fftSize);
   analyser.getByteTimeDomainData(data);
@@ -32,6 +35,9 @@ function createAudioChunkPayload(
     chunk_index: chunkIndex,
     sample_rate: sampleRate,
     timestamp: Date.now(),
+    source_language: sourceLanguage,
+    target_language: targetLanguage,
+    translation_mode: translationMode,
     payload_format: 'uint8_time_domain_base64',
     audio: uint8ArrayToBase64(data),
   };
@@ -42,12 +48,24 @@ type UseRealtimeAudioStreamArgs = {
   sourceStream: MediaStream | null;
   isCapturing: boolean;
   isPaused: boolean;
+  sourceLanguage: string;
+  targetLanguage: string;
+  translationMode: string;
 };
 
 type TranscriptPartialMessage = Extract<RealtimeServerMessage, { type: 'transcript_partial' }>;
 type ServerAckMessage = Extract<RealtimeServerMessage, { type: 'server_ack' }>;
+type TranslationPartialMessage = Extract<RealtimeServerMessage, { type: 'translation_partial' }>;
 
-export function useRealtimeAudioStream({ token, sourceStream, isCapturing, isPaused }: UseRealtimeAudioStreamArgs) {
+export function useRealtimeAudioStream({
+  token,
+  sourceStream,
+  isCapturing,
+  isPaused,
+  sourceLanguage,
+  targetLanguage,
+  translationMode,
+}: UseRealtimeAudioStreamArgs) {
   const serviceRef = useRef(new RealtimeService());
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -61,6 +79,8 @@ export function useRealtimeAudioStream({ token, sourceStream, isCapturing, isPau
   const [lastServerAck, setLastServerAck] = useState<ServerAckMessage | null>(null);
   const [transcriptEvents, setTranscriptEvents] = useState<TranscriptPartialMessage[]>([]);
   const [transcriptText, setTranscriptText] = useState('');
+  const [translationEvents, setTranslationEvents] = useState<TranslationPartialMessage[]>([]);
+  const [translationText, setTranslationText] = useState('');
   const [realtimeError, setRealtimeError] = useState<string | null>(null);
 
   const clearSampler = useCallback(async () => {
@@ -99,6 +119,14 @@ export function useRealtimeAudioStream({ token, sourceStream, isCapturing, isPau
     });
   }, []);
 
+  const appendTranslationPartial = useCallback((message: TranslationPartialMessage) => {
+    setTranslationEvents((current) => {
+      const next = [...current, message].slice(-50);
+      setTranslationText(next.map((event) => event.translated_text).join('\n'));
+      return next;
+    });
+  }, []);
+
   const connect = useCallback(async () => {
     if (!token) {
       const message = 'Token belum tersedia. Silakan login ulang.';
@@ -112,6 +140,8 @@ export function useRealtimeAudioStream({ token, sourceStream, isCapturing, isPau
     setLastServerAck(null);
     setTranscriptEvents([]);
     setTranscriptText('');
+    setTranslationEvents([]);
+    setTranslationText('');
 
     serviceRef.current.setHandlers({
       onMessage: (message) => {
@@ -124,6 +154,10 @@ export function useRealtimeAudioStream({ token, sourceStream, isCapturing, isPau
 
           if (message.type === 'transcript_partial') {
             appendTranscriptPartial(message);
+          }
+
+          if (message.type === 'translation_partial') {
+            appendTranslationPartial(message);
           }
 
           if (message.type === 'error') {
@@ -148,7 +182,7 @@ export function useRealtimeAudioStream({ token, sourceStream, isCapturing, isPau
       setRealtimeError(message);
       setConnectionStatus('error');
     }
-  }, [appendTranscriptPartial, token]);
+  }, [appendTranscriptPartial, appendTranslationPartial, token]);
 
   const disconnect = useCallback(async () => {
     await clearSampler();
@@ -211,7 +245,16 @@ export function useRealtimeAudioStream({ token, sourceStream, isCapturing, isPau
           return;
         }
 
-        sendChunk(createAudioChunkPayload(currentAnalyser, audioContext.sampleRate, chunkIndexRef.current));
+        sendChunk(
+          createAudioChunkPayload(
+            currentAnalyser,
+            audioContext.sampleRate,
+            chunkIndexRef.current,
+            sourceLanguage,
+            targetLanguage,
+            translationMode,
+          ),
+        );
         chunkIndexRef.current += 1;
       }, 250);
     };
@@ -222,7 +265,7 @@ export function useRealtimeAudioStream({ token, sourceStream, isCapturing, isPau
       cancelled = true;
       void clearSampler();
     };
-  }, [clearSampler, connectionStatus, isCapturing, isPaused, sendChunk, sourceStream]);
+  }, [clearSampler, connectionStatus, isCapturing, isPaused, sendChunk, sourceLanguage, sourceStream, targetLanguage, translationMode]);
 
   useEffect(() => {
     if (!isCapturing) {
@@ -248,6 +291,8 @@ export function useRealtimeAudioStream({ token, sourceStream, isCapturing, isPau
       lastServerAck,
       transcriptEvents,
       transcriptText,
+      translationEvents,
+      translationText,
       realtimeError,
     }),
     [
@@ -261,6 +306,8 @@ export function useRealtimeAudioStream({ token, sourceStream, isCapturing, isPau
       lastServerAck,
       transcriptEvents,
       transcriptText,
+      translationEvents,
+      translationText,
       realtimeError,
     ],
   );

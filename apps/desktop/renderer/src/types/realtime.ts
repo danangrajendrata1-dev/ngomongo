@@ -7,6 +7,9 @@ export type RealtimeAudioChunkPayload = {
   chunk_index: number;
   sample_rate: number | null;
   timestamp: number;
+  source_language: string;
+  target_language: string;
+  translation_mode: string;
   payload_format: RealtimeAudioPayloadFormat;
   audio: string;
 };
@@ -25,6 +28,16 @@ export type RealtimeServerMessage =
       chunk_index: number;
       text: string;
       language: string;
+      is_final: false;
+    }
+  | {
+      type: 'translation_partial';
+      chunk_index?: number;
+      original_text: string;
+      translated_text: string;
+      source_language: string;
+      target_language: string;
+      mode: string;
       is_final: false;
     }
   | {
