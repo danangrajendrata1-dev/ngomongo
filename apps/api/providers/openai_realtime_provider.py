@@ -22,6 +22,11 @@ class OpenAIRealtimeProvider(SpeechToTextProvider, TranslationProvider, TextToSp
         # TODO: integrate OpenAI realtime translation when provider wiring is approved.
         return text
 
-    async def synthesize(self, text: str, voice: str | None = None) -> bytes:
+    async def synthesize_speech(
+        self,
+        text: str,
+        voice_id: str | None = None,
+        target_language: str = "en",
+    ) -> tuple[bytes, str]:
         # TODO: integrate OpenAI realtime TTS when provider wiring is approved.
-        return b""
+        return b"", "audio/mpeg"

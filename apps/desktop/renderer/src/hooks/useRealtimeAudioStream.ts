@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { playPlaceholderBeep } from '@/lib/audioPlayback';
+import { playBase64Audio, playPlaceholderBeep, stopAudioPlayback } from '@/lib/audioPlayback';
 import { RealtimeService } from '@/services/realtime.service';
 import type {
   RealtimeAudioSegmentPayload,
@@ -14,7 +14,8 @@ type UseRealtimeAudioStreamArgs = {
 
 type TranscriptMessage = Extract<RealtimeServerMessage, { type: 'transcript_partial' | 'transcript_final' }>;
 type TranslationMessage = Extract<RealtimeServerMessage, { type: 'translation_partial' | 'translation_final' }>;
-type TtsMessage = Extract<RealtimeServerMessage, { type: 'tts_placeholder' }>;
+type TtsPlaceholderMessage = Extract<RealtimeServerMessage, { type: 'tts_placeholder' }>;
+type TtsAudioMessage = Extract<RealtimeServerMessage, { type: 'tts_audio' }>;
 type AckMessage = Extract<RealtimeServerMessage, { type: 'server_ack' }>;
 type OutputStatus = 'idle' | 'speaking';
 type SttMode = 'real' | 'placeholder';
@@ -30,12 +31,15 @@ export function useRealtimeAudioStream({ token }: UseRealtimeAudioStreamArgs) {
   const [transcriptText, setTranscriptText] = useState('');
   const [translationEvents, setTranslationEvents] = useState<TranslationMessage[]>([]);
   const [translationText, setTranslationText] = useState('');
-  const [ttsEvents, setTtsEvents] = useState<TtsMessage[]>([]);
-  const [lastTtsEvent, setLastTtsEvent] = useState<TtsMessage | null>(null);
+  const [ttsEvents, setTtsEvents] = useState<Array<TtsPlaceholderMessage | TtsAudioMessage>>([]);
+  const [lastTtsEvent, setLastTtsEvent] = useState<TtsPlaceholderMessage | null>(null);
+  const [lastTtsAudioEvent, setLastTtsAudioEvent] = useState<TtsAudioMessage | null>(null);
   const [outputStatus, setOutputStatus] = useState<OutputStatus>('idle');
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [sttMode, setSttMode] = useState<SttMode>('real');
   const [lastTranscriptReceived, setLastTranscriptReceived] = useState('');
   const [realtimeError, setRealtimeError] = useState<string | null>(null);
+  const [ttsError, setTtsError] = useState<string | null>(null);
 
   const clearSpeakingTimeout = useCallback(() => {
     if (speakingTimeoutRef.current !== null) {
@@ -49,6 +53,7 @@ export function useRealtimeAudioStream({ token }: UseRealtimeAudioStreamArgs) {
     setOutputStatus('speaking');
     speakingTimeoutRef.current = window.setTimeout(() => {
       setOutputStatus('idle');
+      setIsSpeaking(false);
       speakingTimeoutRef.current = null;
     }, Math.max(150, durationMs));
   }, [clearSpeakingTimeout]);
@@ -70,12 +75,32 @@ export function useRealtimeAudioStream({ token }: UseRealtimeAudioStreamArgs) {
     });
   }, []);
 
-  const appendTts = useCallback((message: TtsMessage) => {
+  const appendTtsPlaceholder = useCallback((message: TtsPlaceholderMessage) => {
     setTtsEvents((current) => [...current, message].slice(-50));
     setLastTtsEvent(message);
     setSpeakingBriefly(message.duration_ms);
+    setIsSpeaking(true);
+    setTtsError(null);
     void playPlaceholderBeep(message.duration_ms);
   }, [setSpeakingBriefly]);
+
+  const appendTtsAudio = useCallback((message: TtsAudioMessage) => {
+    setTtsEvents((current) => [...current, message].slice(-50));
+    setLastTtsAudioEvent(message);
+    setOutputStatus('speaking');
+    setIsSpeaking(true);
+    setTtsError(null);
+    void playBase64Audio(message.audio_base64, message.audio_format)
+      .then(() => {
+        setOutputStatus('idle');
+        setIsSpeaking(false);
+      })
+      .catch((error) => {
+        setOutputStatus('idle');
+        setIsSpeaking(false);
+        setTtsError(error instanceof Error ? error.message : 'Audio playback failed.');
+      });
+  }, []);
 
   const resetSessionState = useCallback(() => {
     setLastServerMessage(null);
@@ -86,11 +111,15 @@ export function useRealtimeAudioStream({ token }: UseRealtimeAudioStreamArgs) {
     setTranslationText('');
     setTtsEvents([]);
     setLastTtsEvent(null);
+    setLastTtsAudioEvent(null);
     setOutputStatus('idle');
+    setIsSpeaking(false);
     setLastTranscriptReceived('');
     setRealtimeError(null);
+    setTtsError(null);
     setSttMode('real');
     clearSpeakingTimeout();
+    stopAudioPlayback();
   }, [clearSpeakingTimeout]);
 
   const connect = useCallback(async (): Promise<boolean> => {
@@ -122,7 +151,11 @@ export function useRealtimeAudioStream({ token }: UseRealtimeAudioStreamArgs) {
           }
 
           if (message.type === 'tts_placeholder') {
-            appendTts(message);
+            appendTtsPlaceholder(message);
+          }
+
+          if (message.type === 'tts_audio') {
+            appendTtsAudio(message);
           }
 
           if (message.type === 'error') {
@@ -154,11 +187,13 @@ export function useRealtimeAudioStream({ token }: UseRealtimeAudioStreamArgs) {
       setConnectionStatus('error');
       return false;
     }
-  }, [appendTranscript, appendTranslation, appendTts, resetSessionState, token]);
+  }, [appendTranscript, appendTranslation, appendTtsAudio, appendTtsPlaceholder, resetSessionState, token]);
 
   const disconnect = useCallback(async () => {
     clearSpeakingTimeout();
     setOutputStatus('idle');
+    setIsSpeaking(false);
+    stopAudioPlayback();
     await serviceRef.current.disconnect();
     setConnectionStatus('disconnected');
   }, [clearSpeakingTimeout]);
@@ -193,10 +228,13 @@ export function useRealtimeAudioStream({ token }: UseRealtimeAudioStreamArgs) {
       translationText,
       ttsEvents,
       lastTtsEvent,
+      lastTtsAudioEvent,
       outputStatus,
+      isSpeaking,
       sttMode,
       lastTranscriptReceived,
       realtimeError,
+      ttsError,
     }),
     [
       connect,
@@ -212,10 +250,13 @@ export function useRealtimeAudioStream({ token }: UseRealtimeAudioStreamArgs) {
       translationText,
       ttsEvents,
       lastTtsEvent,
+      lastTtsAudioEvent,
       outputStatus,
+      isSpeaking,
       sttMode,
       lastTranscriptReceived,
       realtimeError,
+      ttsError,
     ],
   );
 }

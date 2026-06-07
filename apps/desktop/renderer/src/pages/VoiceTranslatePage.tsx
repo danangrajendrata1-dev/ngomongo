@@ -105,11 +105,11 @@ export function VoiceTranslatePage() {
     }
 
     if (realtime.outputStatus === 'speaking') {
-      return 'Processing transcript, translation, and TTS placeholders.';
+      return 'Processing transcript, translation, and TTS output.';
     }
 
     if (realtime.translationEvents.length > 0 || realtime.transcriptEvents.length > 0 || realtime.ttsEvents.length > 0) {
-      return 'Processing transcript, translation, and TTS placeholders.';
+      return 'Processing transcript, translation, and TTS output.';
     }
 
     if (captureStatus === 'paused') {
@@ -176,8 +176,12 @@ export function VoiceTranslatePage() {
     ? `Ack chunk #${realtime.lastServerAck.chunk_index ?? '-'} received (${realtime.lastServerAck.payload_size} bytes)`
     : 'Belum ada respons server.';
 
-  const outputStatusLabel = realtime.outputStatus === 'speaking' ? 'Speaking placeholder' : 'Idle';
-  const ttsMessage = realtime.lastTtsEvent ? 'TTS placeholder received' : 'No TTS placeholder yet.';
+  const outputStatusLabel = realtime.outputStatus === 'speaking' ? 'Speaking' : 'Idle';
+  const ttsMessage = realtime.lastTtsAudioEvent
+    ? 'Real TTS audio received'
+    : realtime.lastTtsEvent
+      ? 'TTS placeholder received'
+      : 'No TTS output yet.';
   const sttModeLabel = realtime.sttMode === 'real' ? 'Real' : 'Placeholder';
   const providerMessage = realtime.lastTranscriptReceived || 'Belum ada transcript dari provider.';
 
@@ -298,7 +302,7 @@ export function VoiceTranslatePage() {
             <span className={`status-pill status-pill--${realtime.sttMode === 'real' ? 'success' : 'warning'}`}>{sttModeLabel}</span>
           </div>
           <p className="text-muted">{providerMessage}</p>
-          <p className="text-muted">{ttsMessage}</p>
+          <p className={realtime.ttsError ? 'text-danger' : 'text-muted'}>{realtime.ttsError ?? ttsMessage}</p>
           <p className={segmentRecorder.error || realtime.realtimeError ? 'text-danger' : 'text-muted'}>
             {segmentRecorder.error ?? realtime.realtimeError ?? lastAckMessage}
           </p>

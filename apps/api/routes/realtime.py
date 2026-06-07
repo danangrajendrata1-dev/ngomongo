@@ -21,6 +21,10 @@ from services.speech_to_text_service import (
     SpeechToTextServiceError,
 )
 from services.text_to_speech_service import TextToSpeechService
+from services.text_to_speech_service import (
+    TextToSpeechConfigurationError,
+    TextToSpeechServiceError,
+)
 from services.translation_service import (
     TranslationService,
     TranslationServiceConfigurationError,
@@ -86,15 +90,48 @@ async def _send_followup_pipeline(
         translation_event.get("chunk_index", "-"),
     )
 
-    tts_event = await text_to_speech_service.synthesize_placeholder(
-        text=str(translation_event.get("translated_text") or ''),
-        voice_profile_id=_get_voice_metadata(payload),
-        target_language=target_language,
-        chunk_index=translation_event.get("chunk_index") if isinstance(translation_event.get("chunk_index"), int) else None,
-    )
+    try:
+        tts_event = await text_to_speech_service.synthesize_output(
+            text=str(translation_event.get("translated_text") or ""),
+            voice_profile_id=_get_voice_metadata(payload),
+            target_language=target_language,
+            chunk_index=translation_event.get("chunk_index") if isinstance(translation_event.get("chunk_index"), int) else None,
+        )
+    except TextToSpeechConfigurationError as exc:
+        await websocket.send_json({
+            "type": "error",
+            "code": exc.code,
+            "detail": str(exc),
+            "message": str(exc),
+        })
+        if not text_to_speech_service.settings.use_tts_placeholder:
+            return
+        tts_event = await text_to_speech_service.synthesize_placeholder(
+            text=str(translation_event.get("translated_text") or ""),
+            voice_profile_id=_get_voice_metadata(payload),
+            target_language=target_language,
+            chunk_index=translation_event.get("chunk_index") if isinstance(translation_event.get("chunk_index"), int) else None,
+        )
+    except TextToSpeechServiceError as exc:
+        await websocket.send_json({
+            "type": "error",
+            "code": exc.code,
+            "detail": "TTS provider failed. Falling back to placeholder audio.",
+            "message": "TTS provider failed. Falling back to placeholder audio.",
+        })
+        if not text_to_speech_service.settings.use_tts_placeholder:
+            return
+        tts_event = await text_to_speech_service.synthesize_placeholder(
+            text=str(translation_event.get("translated_text") or ""),
+            voice_profile_id=_get_voice_metadata(payload),
+            target_language=target_language,
+            chunk_index=translation_event.get("chunk_index") if isinstance(translation_event.get("chunk_index"), int) else None,
+        )
+
     await websocket.send_json(tts_event)
     logger.info(
-        "TTS placeholder sent: chunk_index=%s",
+        "TTS event sent: type=%s chunk_index=%s",
+        tts_event.get("type", "-"),
         tts_event.get("chunk_index", "-"),
     )
 

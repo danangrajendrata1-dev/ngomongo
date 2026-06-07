@@ -28,7 +28,12 @@ class TranslationProvider(ABC):
 
 class TextToSpeechProvider(ABC):
     @abstractmethod
-    async def synthesize(self, text: str, voice: str | None = None) -> bytes:
+    async def synthesize_speech(
+        self,
+        text: str,
+        voice_id: str | None = None,
+        target_language: str = "en",
+    ) -> tuple[bytes, str]:
         raise NotImplementedError
 
 

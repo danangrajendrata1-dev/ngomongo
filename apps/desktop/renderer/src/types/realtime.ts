@@ -81,6 +81,17 @@ export type RealtimeServerMessage =
       voice_profile_id?: string;
     }
   | {
+      type: 'tts_audio';
+      chunk_index?: number;
+      text: string;
+      target_language: string;
+      audio_format: string;
+      audio_base64: string;
+      duration_ms: number | null;
+      is_final: true;
+      voice_profile_id?: string;
+    }
+  | {
       type: 'pong';
     }
   | {
