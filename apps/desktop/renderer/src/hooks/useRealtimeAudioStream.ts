@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { playPlaceholderBeep } from '@/lib/audioPlayback';
 import { RealtimeService } from '@/services/realtime.service';
 import type {
   RealtimeAudioChunkPayload,
@@ -54,8 +55,11 @@ type UseRealtimeAudioStreamArgs = {
 };
 
 type TranscriptPartialMessage = Extract<RealtimeServerMessage, { type: 'transcript_partial' }>;
-type ServerAckMessage = Extract<RealtimeServerMessage, { type: 'server_ack' }>;
 type TranslationPartialMessage = Extract<RealtimeServerMessage, { type: 'translation_partial' }>;
+type ServerAckMessage = Extract<RealtimeServerMessage, { type: 'server_ack' }>;
+type TtsPlaceholderMessage = Extract<RealtimeServerMessage, { type: 'tts_placeholder' }>;
+
+type OutputStatus = 'idle' | 'speaking';
 
 export function useRealtimeAudioStream({
   token,
@@ -71,6 +75,7 @@ export function useRealtimeAudioStream({
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const intervalRef = useRef<number | null>(null);
+  const playbackResetTimerRef = useRef<number | null>(null);
   const chunkIndexRef = useRef(0);
   const samplerReadyRef = useRef(false);
 
@@ -81,7 +86,22 @@ export function useRealtimeAudioStream({
   const [transcriptText, setTranscriptText] = useState('');
   const [translationEvents, setTranslationEvents] = useState<TranslationPartialMessage[]>([]);
   const [translationText, setTranslationText] = useState('');
+  const [ttsEvents, setTtsEvents] = useState<TtsPlaceholderMessage[]>([]);
+  const [lastTtsEvent, setLastTtsEvent] = useState<TtsPlaceholderMessage | null>(null);
+  const [outputStatus, setOutputStatus] = useState<OutputStatus>('idle');
   const [realtimeError, setRealtimeError] = useState<string | null>(null);
+
+  const clearPlaybackResetTimer = useCallback(() => {
+    if (playbackResetTimerRef.current !== null) {
+      window.clearTimeout(playbackResetTimerRef.current);
+      playbackResetTimerRef.current = null;
+    }
+  }, []);
+
+  const resetOutputStatus = useCallback(() => {
+    clearPlaybackResetTimer();
+    setOutputStatus('idle');
+  }, [clearPlaybackResetTimer]);
 
   const clearSampler = useCallback(async () => {
     if (intervalRef.current !== null) {
@@ -127,6 +147,23 @@ export function useRealtimeAudioStream({
     });
   }, []);
 
+  const appendTtsPlaceholder = useCallback(
+    (message: TtsPlaceholderMessage) => {
+      setTtsEvents((current) => [...current, message].slice(-50));
+      setLastTtsEvent(message);
+      setOutputStatus('speaking');
+
+      clearPlaybackResetTimer();
+      playbackResetTimerRef.current = window.setTimeout(() => {
+        setOutputStatus('idle');
+        playbackResetTimerRef.current = null;
+      }, Math.max(120, message.duration_ms));
+
+      void playPlaceholderBeep(message.duration_ms);
+    },
+    [clearPlaybackResetTimer],
+  );
+
   const connect = useCallback(async () => {
     if (!token) {
       const message = 'Token belum tersedia. Silakan login ulang.';
@@ -142,6 +179,9 @@ export function useRealtimeAudioStream({
     setTranscriptText('');
     setTranslationEvents([]);
     setTranslationText('');
+    setTtsEvents([]);
+    setLastTtsEvent(null);
+    setOutputStatus('idle');
 
     serviceRef.current.setHandlers({
       onMessage: (message) => {
@@ -158,6 +198,10 @@ export function useRealtimeAudioStream({
 
           if (message.type === 'translation_partial') {
             appendTranslationPartial(message);
+          }
+
+          if (message.type === 'tts_placeholder') {
+            appendTtsPlaceholder(message);
           }
 
           if (message.type === 'error') {
@@ -182,13 +226,15 @@ export function useRealtimeAudioStream({
       setRealtimeError(message);
       setConnectionStatus('error');
     }
-  }, [appendTranscriptPartial, appendTranslationPartial, token]);
+  }, [appendTranscriptPartial, appendTranslationPartial, appendTtsPlaceholder, token]);
 
   const disconnect = useCallback(async () => {
+    clearPlaybackResetTimer();
+    setOutputStatus('idle');
     await clearSampler();
     await serviceRef.current.disconnect();
     setConnectionStatus('disconnected');
-  }, [clearSampler]);
+  }, [clearPlaybackResetTimer, clearSampler]);
 
   const sendChunk = useCallback((payload: RealtimeAudioChunkPayload) => {
     serviceRef.current.sendAudioChunk(payload);
@@ -270,14 +316,22 @@ export function useRealtimeAudioStream({
   useEffect(() => {
     if (!isCapturing) {
       chunkIndexRef.current = 0;
+      resetOutputStatus();
     }
-  }, [isCapturing]);
+  }, [isCapturing, resetOutputStatus]);
+
+  useEffect(() => {
+    if (isPaused) {
+      resetOutputStatus();
+    }
+  }, [isPaused, resetOutputStatus]);
 
   useEffect(() => {
     return () => {
+      clearPlaybackResetTimer();
       void disconnect();
     };
-  }, [disconnect]);
+  }, [clearPlaybackResetTimer, disconnect]);
 
   return useMemo(
     () => ({
@@ -293,6 +347,9 @@ export function useRealtimeAudioStream({
       transcriptText,
       translationEvents,
       translationText,
+      ttsEvents,
+      lastTtsEvent,
+      outputStatus,
       realtimeError,
     }),
     [
@@ -308,6 +365,9 @@ export function useRealtimeAudioStream({
       transcriptText,
       translationEvents,
       translationText,
+      ttsEvents,
+      lastTtsEvent,
+      outputStatus,
       realtimeError,
     ],
   );

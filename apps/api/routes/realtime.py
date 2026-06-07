@@ -15,11 +15,13 @@ from schemas.translation_schema import TranslationSessionRead, TranslationSessio
 from services.auth_service import AuthService
 from services.realtime_translate_service import RealtimeTranslateService
 from services.speech_to_text_service import SpeechToTextService
+from services.text_to_speech_service import TextToSpeechService
 from services.translation_service import TranslationService
 
 router = APIRouter(prefix="/realtime", tags=["realtime"])
 realtime_service = RealtimeTranslateService()
 speech_to_text_service = SpeechToTextService()
+text_to_speech_service = TextToSpeechService()
 translation_service = TranslationService()
 auth_service = AuthService()
 logger = logging.getLogger(__name__)
@@ -38,6 +40,13 @@ def _get_audio_metadata(payload: dict) -> tuple[str, str, str]:
     target_language = str(payload.get("target_language") or "en")
     translation_mode = str(payload.get("translation_mode") or "discord")
     return source_language, target_language, translation_mode
+
+
+def _get_voice_metadata(payload: dict) -> str | None:
+    voice_profile_id = payload.get("voice_profile_id") or payload.get("output_voice_id")
+    if isinstance(voice_profile_id, str) and voice_profile_id.strip():
+        return voice_profile_id.strip()
+    return None
 
 
 @router.post("/session/start", response_model=TranslationSessionRead, status_code=status.HTTP_201_CREATED)
@@ -141,6 +150,18 @@ async def voice_socket(websocket: WebSocket) -> None:
                 logger.info(
                     "Translation partial sent: chunk_index=%s",
                     translation_event.get("chunk_index", "-"),
+                )
+
+                tts_event = await text_to_speech_service.synthesize_placeholder(
+                    text=str(translation_event.get("translated_text") or ''),
+                    voice_profile_id=_get_voice_metadata(payload),
+                    target_language=target_language,
+                    chunk_index=translation_event.get("chunk_index") if isinstance(translation_event.get("chunk_index"), int) else None,
+                )
+                await websocket.send_json(tts_event)
+                logger.info(
+                    "TTS placeholder sent: chunk_index=%s",
+                    tts_event.get("chunk_index", "-"),
                 )
 
             if response.get("type") == "session_stopped":

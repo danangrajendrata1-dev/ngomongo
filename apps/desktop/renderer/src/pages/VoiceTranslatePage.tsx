@@ -78,7 +78,7 @@ export function VoiceTranslatePage() {
       return 'paused';
     }
 
-    if (realtime.translationEvents.length > 0 || realtime.transcriptEvents.length > 0) {
+    if (realtime.outputStatus === 'speaking' || realtime.translationEvents.length > 0 || realtime.transcriptEvents.length > 0 || realtime.ttsEvents.length > 0) {
       return 'processing';
     }
 
@@ -87,7 +87,7 @@ export function VoiceTranslatePage() {
     }
 
     return 'ready';
-  }, [captureStatus, realtime.realtimeError, realtime.transcriptEvents.length, realtime.translationEvents.length]);
+  }, [captureStatus, realtime.outputStatus, realtime.realtimeError, realtime.transcriptEvents.length, realtime.translationEvents.length, realtime.ttsEvents.length]);
 
   const statusLabel = useMemo(() => {
     if (captureStatus === 'error') {
@@ -98,8 +98,12 @@ export function VoiceTranslatePage() {
       return realtime.realtimeError;
     }
 
-    if (realtime.translationEvents.length > 0 || realtime.transcriptEvents.length > 0) {
-      return 'Processing transcript and translation placeholders.';
+    if (realtime.outputStatus === 'speaking') {
+      return 'Processing transcript, translation, and TTS placeholders.';
+    }
+
+    if (realtime.translationEvents.length > 0 || realtime.transcriptEvents.length > 0 || realtime.ttsEvents.length > 0) {
+      return 'Processing transcript, translation, and TTS placeholders.';
     }
 
     if (captureStatus === 'paused') {
@@ -111,7 +115,7 @@ export function VoiceTranslatePage() {
     }
 
     return 'Ready';
-  }, [captureStatus, realtime.realtimeError, realtime.transcriptEvents.length, realtime.translationEvents.length, statusMessage]);
+  }, [captureStatus, realtime.outputStatus, realtime.realtimeError, realtime.transcriptEvents.length, realtime.translationEvents.length, realtime.ttsEvents.length, statusMessage]);
 
   const handleStart = async () => {
     await realtime.disconnect();
@@ -152,6 +156,9 @@ export function VoiceTranslatePage() {
   const lastAckMessage = realtime.lastServerAck
     ? `Ack chunk #${realtime.lastServerAck.chunk_index ?? '-'} received (${realtime.lastServerAck.payload_size} bytes)`
     : 'Belum ada respons server.';
+
+  const outputStatusLabel = realtime.outputStatus === 'speaking' ? 'Speaking placeholder' : 'Idle';
+  const ttsMessage = realtime.lastTtsEvent ? 'TTS placeholder received' : 'No TTS placeholder yet.';
 
   return (
     <div className="page-grid page-grid--twoColumn">
@@ -255,6 +262,14 @@ export function VoiceTranslatePage() {
             </div>
             <span className="status-pill status-pill--warning">Local only</span>
           </div>
+          <div className="status-card">
+            <div>
+              <p className="status-card__label">Output status</p>
+              <strong className="status-card__value">{outputStatusLabel}</strong>
+            </div>
+            <span className={`status-pill status-pill--${realtime.outputStatus === 'speaking' ? 'success' : 'muted'}`}>{outputStatusLabel}</span>
+          </div>
+          <p className="text-muted">{ttsMessage}</p>
           <p className={realtime.realtimeError ? 'text-danger' : 'text-muted'}>{realtime.realtimeError ?? lastAckMessage}</p>
         </div>
       </Card>

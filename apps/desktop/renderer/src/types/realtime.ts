@@ -41,6 +41,16 @@ export type RealtimeServerMessage =
       is_final: false;
     }
   | {
+      type: 'tts_placeholder';
+      chunk_index?: number;
+      text: string;
+      target_language: string;
+      audio_format: 'client_generated_beep';
+      duration_ms: number;
+      is_final: false;
+      voice_profile_id?: string;
+    }
+  | {
       type: 'pong';
     }
   | {
