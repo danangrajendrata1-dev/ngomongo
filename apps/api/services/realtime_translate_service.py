@@ -1,7 +1,15 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+import logging
+from typing import Any
+
 from sqlalchemy.orm import Session
 
 from models.translation_session import TranslationSession
 from repositories.session_repository import SessionRepository
+
+logger = logging.getLogger(__name__)
 
 
 class RealtimeTranslateService:
@@ -34,10 +42,59 @@ class RealtimeTranslateService:
         session.status = "stopped"
         return self.session_repository.update(db, session)
 
-    async def handle_message(self, message: str) -> dict[str, str]:
-        # TODO: connect STT -> translation -> TTS pipeline here.
-        return {
-            "event": "placeholder",
-            "message": message,
-            "translated_text": message,
+    async def handle_message(self, payload: dict[str, Any]) -> dict[str, Any]:
+        message_type = str(payload.get("type") or "")
+
+        if message_type == "ping":
+            logger.info("Realtime ping received")
+            return {"type": "pong"}
+
+        if message_type == "session_stop":
+            logger.info("Realtime session stop received")
+            return {"type": "session_stopped"}
+
+        if message_type != "audio_chunk":
+            return {
+                "type": "error",
+                "code": "UNSUPPORTED_MESSAGE_TYPE",
+                "detail": "Tipe pesan realtime belum didukung.",
+            }
+
+        audio = payload.get("audio")
+        payload_size = 0
+        received_samples = None
+
+        if isinstance(audio, str):
+            payload_size = len(audio)
+        elif isinstance(audio, list):
+            received_samples = len(audio)
+            payload_size = len(audio)
+        elif isinstance(audio, (bytes, bytearray)):
+            payload_size = len(audio)
+
+        if payload_size == 0:
+            raw_payload = payload.get("payload")
+            if isinstance(raw_payload, str):
+                payload_size = len(raw_payload)
+
+        response: dict[str, Any] = {
+            "type": "server_ack",
+            "status": "received",
+            "received_at": datetime.now(timezone.utc).isoformat(),
+            "payload_size": payload_size,
         }
+
+        chunk_index = payload.get("chunk_index")
+        if isinstance(chunk_index, int):
+            response["chunk_index"] = chunk_index
+
+        if received_samples is not None:
+            response["received_samples"] = received_samples
+
+        logger.info(
+            "Realtime audio chunk received: chunk_index=%s payload_size=%s",
+            response.get("chunk_index", "-"),
+            payload_size,
+        )
+
+        return response

@@ -1,3 +1,9 @@
+from __future__ import annotations
+
+import json
+import logging
+from json import JSONDecodeError
+
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status
 from sqlalchemy.orm import Session
 
@@ -8,10 +14,13 @@ from core.websocket_manager import websocket_manager
 from schemas.translation_schema import TranslationSessionRead, TranslationSessionStart, TranslationSessionStop
 from services.auth_service import AuthService
 from services.realtime_translate_service import RealtimeTranslateService
+from services.speech_to_text_service import SpeechToTextService
 
 router = APIRouter(prefix="/realtime", tags=["realtime"])
 realtime_service = RealtimeTranslateService()
+speech_to_text_service = SpeechToTextService()
 auth_service = AuthService()
+logger = logging.getLogger(__name__)
 
 
 def _get_user_id(token: str) -> str:
@@ -79,8 +88,40 @@ async def voice_socket(websocket: WebSocket) -> None:
     try:
         while True:
             message = await websocket.receive_text()
-            response = await realtime_service.handle_message(message)
+            try:
+                payload = json.loads(message)
+            except JSONDecodeError:
+                logger.warning("Invalid realtime JSON payload received")
+                await websocket.send_json({
+                    "type": "error",
+                    "code": "INVALID_JSON",
+                    "detail": "Payload JSON tidak valid.",
+                })
+                continue
+
+            if not isinstance(payload, dict):
+                await websocket.send_json({
+                    "type": "error",
+                    "code": "INVALID_PAYLOAD",
+                    "detail": "Payload websocket harus berupa object JSON.",
+                })
+                continue
+
+            response = await realtime_service.handle_message(payload)
             await websocket.send_json(response)
+            logger.info("Realtime response sent: %s", response.get("type"))
+
+            if payload.get("type") == "audio_chunk" and response.get("type") != "error":
+                transcript_event = await speech_to_text_service.process_audio_chunk(payload)
+                await websocket.send_json(transcript_event)
+                logger.info(
+                    "Transcript partial sent: chunk_index=%s",
+                    transcript_event.get("chunk_index", "-"),
+                )
+
+            if response.get("type") == "session_stopped":
+                await websocket.close(code=status.WS_1000_NORMAL_CLOSURE)
+                break
     except WebSocketDisconnect:
         websocket_manager.disconnect(connection_id)
     except Exception:  # noqa: BLE001

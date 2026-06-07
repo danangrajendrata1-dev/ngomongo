@@ -1,0 +1,19 @@
+appId: com.ngomongo.desktop
+productName: NGOMONGO
+asar: true
+directories:
+  output: release
+files:
+  - dist/electron/**/*
+  - dist/renderer/**/*
+  - package.json
+extraMetadata:
+  main: dist/electron/main.js
+win:
+  target:
+    - nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true

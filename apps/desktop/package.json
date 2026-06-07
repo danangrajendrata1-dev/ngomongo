@@ -1,0 +1,37 @@
+{
+  "name": "ngomongo-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NGOMONGO desktop foundation",
+  "main": "dist/electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k -n RENDERER,ELECTRON,MAIN -c blue,magenta,green \"npm run dev:renderer\" \"npm run dev:electron:build\" \"npm run dev:electron:run\"",
+    "dev:renderer": "vite --config renderer/vite.config.ts",
+    "dev:electron:build": "tsc -p tsconfig.electron.json --watch --preserveWatchOutput",
+    "dev:electron:run": "wait-on http://127.0.0.1:5173 dist/electron/main.js dist/electron/preload.js && nodemon --watch dist/electron --exec electron dist/electron/main.js",
+    "build": "npm run build:renderer && npm run build:electron",
+    "build:renderer": "vite build --config renderer/vite.config.ts",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "start": "electron dist/electron/main.js",
+    "dist": "npm run build && electron-builder",
+    "typecheck": "tsc -p tsconfig.electron.json --noEmit && tsc -p renderer/tsconfig.json --noEmit",
+    "lint": "npm run typecheck"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.16.5",
+    "@types/react": "^18.3.24",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^5.0.0",
+    "concurrently": "^9.1.2",
+    "electron": "^36.3.0",
+    "electron-builder": "^26.0.12",
+    "nodemon": "^3.1.10",
+    "typescript": "^5.8.3",
+    "vite": "^7.0.4",
+    "wait-on": "^8.0.3"
+  }
+}

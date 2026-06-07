@@ -1,0 +1,267 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
+import { RealtimeService } from '@/services/realtime.service';
+import type {
+  RealtimeAudioChunkPayload,
+  RealtimeConnectionStatus,
+  RealtimeServerMessage,
+} from '@/types/realtime';
+
+function uint8ArrayToBase64(data: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+
+  for (let index = 0; index < data.length; index += chunkSize) {
+    const chunk = data.subarray(index, index + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+
+  return window.btoa(binary);
+}
+
+function createAudioChunkPayload(
+  analyser: AnalyserNode,
+  sampleRate: number,
+  chunkIndex: number,
+): RealtimeAudioChunkPayload {
+  const data = new Uint8Array(analyser.fftSize);
+  analyser.getByteTimeDomainData(data);
+
+  return {
+    type: 'audio_chunk',
+    chunk_index: chunkIndex,
+    sample_rate: sampleRate,
+    timestamp: Date.now(),
+    payload_format: 'uint8_time_domain_base64',
+    audio: uint8ArrayToBase64(data),
+  };
+}
+
+type UseRealtimeAudioStreamArgs = {
+  token: string | null;
+  sourceStream: MediaStream | null;
+  isCapturing: boolean;
+  isPaused: boolean;
+};
+
+type TranscriptPartialMessage = Extract<RealtimeServerMessage, { type: 'transcript_partial' }>;
+type ServerAckMessage = Extract<RealtimeServerMessage, { type: 'server_ack' }>;
+
+export function useRealtimeAudioStream({ token, sourceStream, isCapturing, isPaused }: UseRealtimeAudioStreamArgs) {
+  const serviceRef = useRef(new RealtimeService());
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const intervalRef = useRef<number | null>(null);
+  const chunkIndexRef = useRef(0);
+  const samplerReadyRef = useRef(false);
+
+  const [connectionStatus, setConnectionStatus] = useState<RealtimeConnectionStatus>('disconnected');
+  const [lastServerMessage, setLastServerMessage] = useState<RealtimeServerMessage | null>(null);
+  const [lastServerAck, setLastServerAck] = useState<ServerAckMessage | null>(null);
+  const [transcriptEvents, setTranscriptEvents] = useState<TranscriptPartialMessage[]>([]);
+  const [transcriptText, setTranscriptText] = useState('');
+  const [realtimeError, setRealtimeError] = useState<string | null>(null);
+
+  const clearSampler = useCallback(async () => {
+    if (intervalRef.current !== null) {
+      window.clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+
+    sourceNodeRef.current?.disconnect();
+    sourceNodeRef.current = null;
+    analyserRef.current?.disconnect();
+    analyserRef.current = null;
+
+    const context = audioContextRef.current;
+    audioContextRef.current = null;
+    samplerReadyRef.current = false;
+
+    if (context) {
+      try {
+        await context.close();
+      } catch {
+        try {
+          await context.suspend();
+        } catch {
+          // ignore cleanup failures
+        }
+      }
+    }
+  }, []);
+
+  const appendTranscriptPartial = useCallback((message: TranscriptPartialMessage) => {
+    setTranscriptEvents((current) => {
+      const next = [...current, message].slice(-50);
+      setTranscriptText(next.map((event) => event.text).join('\n'));
+      return next;
+    });
+  }, []);
+
+  const connect = useCallback(async () => {
+    if (!token) {
+      const message = 'Token belum tersedia. Silakan login ulang.';
+      setRealtimeError(message);
+      setConnectionStatus('error');
+      return;
+    }
+
+    setRealtimeError(null);
+    setLastServerMessage(null);
+    setLastServerAck(null);
+    setTranscriptEvents([]);
+    setTranscriptText('');
+
+    serviceRef.current.setHandlers({
+      onMessage: (message) => {
+        setLastServerMessage(message);
+
+        if (message && typeof message === 'object' && 'type' in message) {
+          if (message.type === 'server_ack') {
+            setLastServerAck(message);
+          }
+
+          if (message.type === 'transcript_partial') {
+            appendTranscriptPartial(message);
+          }
+
+          if (message.type === 'error') {
+            setRealtimeError(typeof message.detail === 'string' ? message.detail : 'WebSocket mengembalikan error.');
+            setConnectionStatus('error');
+          }
+        }
+      },
+      onStatusChange: (status) => {
+        setConnectionStatus(status);
+      },
+      onError: (message) => {
+        setRealtimeError(message);
+        setConnectionStatus('error');
+      },
+    });
+
+    try {
+      await serviceRef.current.connect({ token });
+    } catch (connectError) {
+      const message = connectError instanceof Error ? connectError.message : 'Gagal terhubung ke WebSocket realtime.';
+      setRealtimeError(message);
+      setConnectionStatus('error');
+    }
+  }, [appendTranscriptPartial, token]);
+
+  const disconnect = useCallback(async () => {
+    await clearSampler();
+    await serviceRef.current.disconnect();
+    setConnectionStatus('disconnected');
+  }, [clearSampler]);
+
+  const sendChunk = useCallback((payload: RealtimeAudioChunkPayload) => {
+    serviceRef.current.sendAudioChunk(payload);
+  }, []);
+
+  const sendPing = useCallback(() => {
+    serviceRef.current.sendPing();
+  }, []);
+
+  const sendSessionStop = useCallback(() => {
+    serviceRef.current.sendSessionStop();
+  }, []);
+
+  useEffect(() => {
+    if (connectionStatus !== 'connected' || !isCapturing || isPaused || !sourceStream) {
+      void clearSampler();
+      return;
+    }
+
+    let cancelled = false;
+
+    const startSampler = async () => {
+      if (samplerReadyRef.current) {
+        return;
+      }
+
+      const audioContext = new AudioContext();
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0.2;
+
+      const sourceNode = audioContext.createMediaStreamSource(sourceStream);
+      sourceNode.connect(analyser);
+
+      audioContextRef.current = audioContext;
+      analyserRef.current = analyser;
+      sourceNodeRef.current = sourceNode;
+      samplerReadyRef.current = true;
+
+      try {
+        await audioContext.resume();
+      } catch {
+        // If resume fails we still keep the context available for teardown.
+      }
+
+      if (cancelled) {
+        await clearSampler();
+        return;
+      }
+
+      intervalRef.current = window.setInterval(() => {
+        const currentAnalyser = analyserRef.current;
+        if (!currentAnalyser || isPaused || connectionStatus !== 'connected') {
+          return;
+        }
+
+        sendChunk(createAudioChunkPayload(currentAnalyser, audioContext.sampleRate, chunkIndexRef.current));
+        chunkIndexRef.current += 1;
+      }, 250);
+    };
+
+    void startSampler();
+
+    return () => {
+      cancelled = true;
+      void clearSampler();
+    };
+  }, [clearSampler, connectionStatus, isCapturing, isPaused, sendChunk, sourceStream]);
+
+  useEffect(() => {
+    if (!isCapturing) {
+      chunkIndexRef.current = 0;
+    }
+  }, [isCapturing]);
+
+  useEffect(() => {
+    return () => {
+      void disconnect();
+    };
+  }, [disconnect]);
+
+  return useMemo(
+    () => ({
+      connect,
+      disconnect,
+      sendChunk,
+      sendPing,
+      sendSessionStop,
+      connectionStatus,
+      lastServerMessage,
+      lastServerAck,
+      transcriptEvents,
+      transcriptText,
+      realtimeError,
+    }),
+    [
+      connect,
+      disconnect,
+      sendChunk,
+      sendPing,
+      sendSessionStop,
+      connectionStatus,
+      lastServerMessage,
+      lastServerAck,
+      transcriptEvents,
+      transcriptText,
+      realtimeError,
+    ],
+  );
+}
