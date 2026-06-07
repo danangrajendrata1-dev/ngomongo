@@ -2,7 +2,13 @@ from providers.provider_interface import SpeechToTextProvider, TextToSpeechProvi
 
 
 class OpenAIRealtimeProvider(SpeechToTextProvider, TranslationProvider, TextToSpeechProvider):
-    async def transcribe(self, audio_bytes: bytes, language: str | None = None) -> str:
+    async def transcribe_audio(
+        self,
+        audio_bytes: bytes,
+        filename: str,
+        content_type: str,
+        language: str | None = None,
+    ) -> str:
         # TODO: integrate OpenAI realtime transcription when provider wiring is approved.
         return ""
 

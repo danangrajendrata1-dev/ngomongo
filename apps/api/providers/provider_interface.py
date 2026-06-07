@@ -4,7 +4,13 @@ from typing import Any
 
 class SpeechToTextProvider(ABC):
     @abstractmethod
-    async def transcribe(self, audio_bytes: bytes, language: str | None = None) -> str:
+    async def transcribe_audio(
+        self,
+        audio_bytes: bytes,
+        filename: str,
+        content_type: str,
+        language: str | None = None,
+    ) -> str:
         raise NotImplementedError
 
 

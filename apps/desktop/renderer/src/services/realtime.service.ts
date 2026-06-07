@@ -1,5 +1,10 @@
 import { WS_URL } from '@/lib/constants';
-import type { RealtimeAudioChunkPayload, RealtimeServerMessage, RealtimeConnectionStatus } from '@/types/realtime';
+import type {
+  RealtimeAudioChunkPayload,
+  RealtimeAudioSegmentPayload,
+  RealtimeConnectionStatus,
+  RealtimeServerMessage,
+} from '@/types/realtime';
 
 type RealtimeHandlers = {
   onMessage?: (message: RealtimeServerMessage) => void;
@@ -124,6 +129,10 @@ export class RealtimeService {
   }
 
   sendAudioChunk(payload: RealtimeAudioChunkPayload): void {
+    this.sendJson(payload);
+  }
+
+  sendAudioSegment(payload: RealtimeAudioSegmentPayload): void {
     this.sendJson(payload);
   }
 

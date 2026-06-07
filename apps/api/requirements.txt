@@ -12,3 +12,4 @@ email-validator
 websockets
 python-dotenv
 httpx
+openai

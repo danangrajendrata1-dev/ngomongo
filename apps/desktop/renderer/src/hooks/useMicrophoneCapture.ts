@@ -122,13 +122,13 @@ export function useMicrophoneCapture() {
     rafRef.current = window.requestAnimationFrame(readLevel);
   }, []);
 
-  const startCapture = useCallback(async (inputDeviceId?: string) => {
+  const startCapture = useCallback(async (inputDeviceId?: string): Promise<MediaStream | null> => {
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
       setState((current) => ({
         ...current,
         error: 'Media devices are not supported in this environment.',
       }));
-      return;
+      return null;
     }
 
     await stopCapture();
@@ -170,6 +170,7 @@ export function useMicrophoneCapture() {
 
       void audioContext.resume();
       rafRef.current = window.requestAnimationFrame(readLevel);
+      return stream;
     } catch (error) {
       const message = getFriendlyCaptureError(error);
       activeRef.current = false;
@@ -183,6 +184,7 @@ export function useMicrophoneCapture() {
         isPaused: false,
         error: message,
       });
+      return null;
     }
   }, [cleanupGraph, readLevel, stopCapture, stopTracks]);
 

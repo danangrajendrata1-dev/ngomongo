@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { AudioLevelMeter } from '@/components/audio/AudioLevelMeter';
 import { LatencyIndicator } from '@/components/audio/LatencyIndicator';
@@ -13,6 +13,7 @@ import { VoiceModeSelector } from '@/components/translator/VoiceModeSelector';
 import { useAuth } from '@/stores/authStore';
 import { LANGUAGE_OPTIONS } from '@/lib/constants';
 import { useLocalSettings } from '@/hooks/useLocalSettings';
+import { useAudioSegmentRecorder } from '@/hooks/useAudioSegmentRecorder';
 import { useMicrophoneCapture } from '@/hooks/useMicrophoneCapture';
 import { useRealtimeAudioStream } from '@/hooks/useRealtimeAudioStream';
 import type { RealtimeConnectionState } from '@/types/translator';
@@ -23,15 +24,30 @@ type CaptureStatus = 'ready' | 'listening' | 'paused' | 'error';
 export function VoiceTranslatePage() {
   const auth = useAuth();
   const { settings, updateSettings } = useLocalSettings();
+  const segmentIndexRef = useRef(0);
   const microphone = useMicrophoneCapture();
   const realtime = useRealtimeAudioStream({
     token: auth.token,
-    sourceStream: microphone.stream,
-    isCapturing: microphone.isCapturing,
-    isPaused: microphone.isPaused,
-    sourceLanguage: settings.source_language === 'English' ? 'en' : 'id',
-    targetLanguage: settings.target_language === 'English' ? 'en' : 'id',
-    translationMode: settings.translation_mode.toLowerCase(),
+  });
+  const sourceLanguageCode = settings.source_language === 'English' ? 'en' : 'id';
+  const targetLanguageCode = settings.target_language === 'English' ? 'en' : 'id';
+  const translationModeCode = settings.translation_mode.toLowerCase();
+  const segmentRecorder = useAudioSegmentRecorder({
+    onSegment: async (segment) => {
+      segmentIndexRef.current += 1;
+      realtime.sendAudioSegment({
+        type: 'audio_segment',
+        chunk_index: segmentIndexRef.current,
+        timestamp: Date.now(),
+        source_language: sourceLanguageCode,
+        target_language: targetLanguageCode,
+        translation_mode: translationModeCode,
+        content_type: segment.contentType || 'audio/webm',
+        filename: segment.filename,
+        audio_base64: segment.audioBase64,
+      });
+    },
+    segmentDurationMs: 3000,
   });
   const [captureStatus, setCaptureStatus] = useState<CaptureStatus>('ready');
   const [statusMessage, setStatusMessage] = useState('Ready for local microphone capture.');
@@ -58,16 +74,6 @@ export function VoiceTranslatePage() {
     setCaptureStatus('ready');
     setStatusMessage('Ready for local microphone capture.');
   }, [microphone.error, microphone.isCapturing, microphone.isPaused]);
-
-  useEffect(() => {
-    if (!microphone.isCapturing || microphone.error) {
-      return;
-    }
-
-    if (realtime.connectionStatus === 'disconnected') {
-      void realtime.connect();
-    }
-  }, [microphone.error, microphone.isCapturing, realtime.connect, realtime.connectionStatus]);
 
   const realtimeState: RealtimeConnectionState = useMemo(() => {
     if (captureStatus === 'error' || realtime.realtimeError) {
@@ -119,10 +125,21 @@ export function VoiceTranslatePage() {
 
   const handleStart = async () => {
     await realtime.disconnect();
-    await microphone.startCapture(settings.selected_input_device_id || undefined);
+    segmentIndexRef.current = 0;
+    const isConnected = await realtime.connect();
+    if (!isConnected) {
+      return;
+    }
+    const stream = await microphone.startCapture(settings.selected_input_device_id || undefined);
+    if (!stream) {
+      await realtime.disconnect();
+      return;
+    }
+    await segmentRecorder.startRecording(stream);
   };
 
   const handleStop = async () => {
+    await segmentRecorder.stopRecording();
     if (realtime.connectionStatus === 'connected') {
       realtime.sendSessionStop();
       await realtime.disconnect();
@@ -133,10 +150,12 @@ export function VoiceTranslatePage() {
   const handlePauseResume = async () => {
     if (microphone.isPaused) {
       await microphone.resumeCapture();
+      segmentRecorder.resumeRecording();
       return;
     }
 
     await microphone.pauseCapture();
+    segmentRecorder.pauseRecording();
   };
 
   const websocketStatusLabel: Record<RealtimeConnectionStatus, string> = {
@@ -159,6 +178,8 @@ export function VoiceTranslatePage() {
 
   const outputStatusLabel = realtime.outputStatus === 'speaking' ? 'Speaking placeholder' : 'Idle';
   const ttsMessage = realtime.lastTtsEvent ? 'TTS placeholder received' : 'No TTS placeholder yet.';
+  const sttModeLabel = realtime.sttMode === 'real' ? 'Real' : 'Placeholder';
+  const providerMessage = realtime.lastTranscriptReceived || 'Belum ada transcript dari provider.';
 
   return (
     <div className="page-grid page-grid--twoColumn">
@@ -228,7 +249,7 @@ export function VoiceTranslatePage() {
           />
 
           <p className={captureStatus === 'error' || realtime.realtimeError ? 'text-danger' : 'text-muted'}>
-            {realtime.realtimeError ?? statusMessage}
+            {segmentRecorder.error ?? realtime.realtimeError ?? statusMessage}
           </p>
         </div>
       </Card>
@@ -269,14 +290,24 @@ export function VoiceTranslatePage() {
             </div>
             <span className={`status-pill status-pill--${realtime.outputStatus === 'speaking' ? 'success' : 'muted'}`}>{outputStatusLabel}</span>
           </div>
+          <div className="status-card">
+            <div>
+              <p className="status-card__label">STT mode</p>
+              <strong className="status-card__value">{sttModeLabel}</strong>
+            </div>
+            <span className={`status-pill status-pill--${realtime.sttMode === 'real' ? 'success' : 'warning'}`}>{sttModeLabel}</span>
+          </div>
+          <p className="text-muted">{providerMessage}</p>
           <p className="text-muted">{ttsMessage}</p>
-          <p className={realtime.realtimeError ? 'text-danger' : 'text-muted'}>{realtime.realtimeError ?? lastAckMessage}</p>
+          <p className={segmentRecorder.error || realtime.realtimeError ? 'text-danger' : 'text-muted'}>
+            {segmentRecorder.error ?? realtime.realtimeError ?? lastAckMessage}
+          </p>
         </div>
       </Card>
 
       <TranscriptPanel
         label="Original transcript"
-        text={realtime.transcriptText || 'Transkrip asli akan muncul di sini saat audio pipeline placeholder mengirim transcript_partial.'}
+        text={realtime.transcriptText || 'Transkrip asli akan muncul di sini saat audio segment dikirim ke STT provider.'}
       />
 
       <TranslationPanel

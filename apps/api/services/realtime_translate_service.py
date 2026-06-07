@@ -53,7 +53,7 @@ class RealtimeTranslateService:
             logger.info("Realtime session stop received")
             return {"type": "session_stopped"}
 
-        if message_type != "audio_chunk":
+        if message_type not in {"audio_chunk", "audio_segment"}:
             return {
                 "type": "error",
                 "code": "UNSUPPORTED_MESSAGE_TYPE",
@@ -61,6 +61,7 @@ class RealtimeTranslateService:
             }
 
         audio = payload.get("audio")
+        audio_base64 = payload.get("audio_base64")
         payload_size = 0
         received_samples = None
 
@@ -77,6 +78,9 @@ class RealtimeTranslateService:
             if isinstance(raw_payload, str):
                 payload_size = len(raw_payload)
 
+        if payload_size == 0 and isinstance(audio_base64, str):
+            payload_size = len(audio_base64)
+
         response: dict[str, Any] = {
             "type": "server_ack",
             "status": "received",
@@ -92,7 +96,8 @@ class RealtimeTranslateService:
             response["received_samples"] = received_samples
 
         logger.info(
-            "Realtime audio chunk received: chunk_index=%s payload_size=%s",
+            "Realtime audio payload received: type=%s chunk_index=%s payload_size=%s",
+            message_type,
             response.get("chunk_index", "-"),
             payload_size,
         )

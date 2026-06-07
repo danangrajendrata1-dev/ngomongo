@@ -14,7 +14,12 @@ from core.websocket_manager import websocket_manager
 from schemas.translation_schema import TranslationSessionRead, TranslationSessionStart, TranslationSessionStop
 from services.auth_service import AuthService
 from services.realtime_translate_service import RealtimeTranslateService
-from services.speech_to_text_service import SpeechToTextService
+from services.speech_to_text_service import (
+    SpeechToTextConfigurationError,
+    SpeechToTextPayloadError,
+    SpeechToTextService,
+    SpeechToTextServiceError,
+)
 from services.text_to_speech_service import TextToSpeechService
 from services.translation_service import TranslationService
 
@@ -47,6 +52,47 @@ def _get_voice_metadata(payload: dict) -> str | None:
     if isinstance(voice_profile_id, str) and voice_profile_id.strip():
         return voice_profile_id.strip()
     return None
+
+
+async def _send_followup_pipeline(
+    websocket: WebSocket,
+    payload: dict,
+    transcript_event: dict,
+    source_language: str,
+    target_language: str,
+    translation_mode: str,
+) -> None:
+    await websocket.send_json(transcript_event)
+    logger.info(
+        "Transcript event sent: type=%s chunk_index=%s",
+        transcript_event.get("type", "-"),
+        transcript_event.get("chunk_index", "-"),
+    )
+
+    translation_event = await translation_service.translate_partial_text(
+        text=str(transcript_event.get("text") or ''),
+        source_language=source_language,
+        target_language=target_language,
+        mode=translation_mode,
+        chunk_index=transcript_event.get("chunk_index") if isinstance(transcript_event.get("chunk_index"), int) else None,
+    )
+    await websocket.send_json(translation_event)
+    logger.info(
+        "Translation partial sent: chunk_index=%s",
+        translation_event.get("chunk_index", "-"),
+    )
+
+    tts_event = await text_to_speech_service.synthesize_placeholder(
+        text=str(translation_event.get("translated_text") or ''),
+        voice_profile_id=_get_voice_metadata(payload),
+        target_language=target_language,
+        chunk_index=translation_event.get("chunk_index") if isinstance(translation_event.get("chunk_index"), int) else None,
+    )
+    await websocket.send_json(tts_event)
+    logger.info(
+        "TTS placeholder sent: chunk_index=%s",
+        tts_event.get("chunk_index", "-"),
+    )
 
 
 @router.post("/session/start", response_model=TranslationSessionRead, status_code=status.HTTP_201_CREATED)
@@ -87,7 +133,7 @@ async def voice_socket(websocket: WebSocket) -> None:
     token = websocket.query_params.get("token")
     if token is None:
         await websocket.accept()
-        await websocket.send_json({"event": "error", "code": "AUTH_ERROR", "detail": "Token diperlukan"})
+        await websocket.send_json({"type": "error", "code": "AUTH_ERROR", "detail": "Token diperlukan", "message": "Token diperlukan"})
         await websocket.close(code=4401)
         return
 
@@ -97,7 +143,7 @@ async def voice_socket(websocket: WebSocket) -> None:
             auth_service.get_current_user(db, user_id)
     except Exception:  # noqa: BLE001
         await websocket.accept()
-        await websocket.send_json({"event": "error", "code": "AUTH_ERROR", "detail": "Token tidak valid"})
+        await websocket.send_json({"type": "error", "code": "AUTH_ERROR", "detail": "Token tidak valid", "message": "Token tidak valid"})
         await websocket.close(code=4401)
         return
 
@@ -131,37 +177,52 @@ async def voice_socket(websocket: WebSocket) -> None:
 
             if payload.get("type") == "audio_chunk" and response.get("type") != "error":
                 source_language, target_language, translation_mode = _get_audio_metadata(payload)
-
                 transcript_event = await speech_to_text_service.process_audio_chunk(payload)
-                await websocket.send_json(transcript_event)
-                logger.info(
-                    "Transcript partial sent: chunk_index=%s",
-                    transcript_event.get("chunk_index", "-"),
+                await _send_followup_pipeline(
+                    websocket,
+                    payload,
+                    transcript_event,
+                    source_language,
+                    target_language,
+                    translation_mode,
                 )
 
-                translation_event = await translation_service.translate_partial_text(
-                    text=str(transcript_event.get("text") or ''),
-                    source_language=source_language,
-                    target_language=target_language,
-                    mode=translation_mode,
-                    chunk_index=transcript_event.get("chunk_index") if isinstance(transcript_event.get("chunk_index"), int) else None,
-                )
-                await websocket.send_json(translation_event)
-                logger.info(
-                    "Translation partial sent: chunk_index=%s",
-                    translation_event.get("chunk_index", "-"),
-                )
+            if payload.get("type") == "audio_segment" and response.get("type") != "error":
+                source_language, target_language, translation_mode = _get_audio_metadata(payload)
+                try:
+                    transcript_event = await speech_to_text_service.process_audio_segment(payload)
+                except SpeechToTextConfigurationError as exc:
+                    await websocket.send_json({
+                        "type": "error",
+                        "code": exc.code,
+                        "detail": str(exc),
+                        "message": str(exc),
+                    })
+                    continue
+                except SpeechToTextPayloadError as exc:
+                    await websocket.send_json({
+                        "type": "error",
+                        "code": exc.code,
+                        "detail": str(exc),
+                        "message": str(exc),
+                    })
+                    continue
+                except SpeechToTextServiceError as exc:
+                    await websocket.send_json({
+                        "type": "error",
+                        "code": exc.code,
+                        "detail": str(exc),
+                        "message": str(exc),
+                    })
+                    continue
 
-                tts_event = await text_to_speech_service.synthesize_placeholder(
-                    text=str(translation_event.get("translated_text") or ''),
-                    voice_profile_id=_get_voice_metadata(payload),
-                    target_language=target_language,
-                    chunk_index=translation_event.get("chunk_index") if isinstance(translation_event.get("chunk_index"), int) else None,
-                )
-                await websocket.send_json(tts_event)
-                logger.info(
-                    "TTS placeholder sent: chunk_index=%s",
-                    tts_event.get("chunk_index", "-"),
+                await _send_followup_pipeline(
+                    websocket,
+                    payload,
+                    transcript_event,
+                    source_language,
+                    target_language,
+                    translation_mode,
                 )
 
             if response.get("type") == "session_stopped":

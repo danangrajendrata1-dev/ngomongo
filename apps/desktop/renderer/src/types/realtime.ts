@@ -14,6 +14,19 @@ export type RealtimeAudioChunkPayload = {
   audio: string;
 };
 
+export type RealtimeAudioSegmentPayload = {
+  type: 'audio_segment';
+  chunk_index: number;
+  timestamp: number;
+  source_language: string;
+  target_language: string;
+  translation_mode: string;
+  content_type: string;
+  filename: string;
+  audio_base64: string;
+  use_placeholder?: boolean;
+};
+
 export type RealtimeServerMessage =
   | {
       type: 'server_ack';
@@ -29,6 +42,13 @@ export type RealtimeServerMessage =
       text: string;
       language: string;
       is_final: false;
+    }
+  | {
+      type: 'transcript_final';
+      chunk_index: number;
+      text: string;
+      language: string;
+      is_final: true;
     }
   | {
       type: 'translation_partial';
@@ -60,5 +80,6 @@ export type RealtimeServerMessage =
       type: 'error';
       code?: string;
       detail?: string;
+      message?: string;
     }
   | Record<string, unknown>;
