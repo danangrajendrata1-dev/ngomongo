@@ -10,6 +10,7 @@ import type {
 
 type UseRealtimeAudioStreamArgs = {
   token: string | null;
+  outputDeviceId?: string;
 };
 
 type TranscriptMessage = Extract<RealtimeServerMessage, { type: 'transcript_partial' | 'transcript_final' }>;
@@ -20,7 +21,7 @@ type AckMessage = Extract<RealtimeServerMessage, { type: 'server_ack' }>;
 type OutputStatus = 'idle' | 'speaking';
 type SttMode = 'real' | 'placeholder';
 
-export function useRealtimeAudioStream({ token }: UseRealtimeAudioStreamArgs) {
+export function useRealtimeAudioStream({ token, outputDeviceId }: UseRealtimeAudioStreamArgs) {
   const serviceRef = useRef(new RealtimeService());
   const speakingTimeoutRef = useRef<number | null>(null);
 
@@ -40,6 +41,7 @@ export function useRealtimeAudioStream({ token }: UseRealtimeAudioStreamArgs) {
   const [lastTranscriptReceived, setLastTranscriptReceived] = useState('');
   const [realtimeError, setRealtimeError] = useState<string | null>(null);
   const [ttsError, setTtsError] = useState<string | null>(null);
+  const [outputWarning, setOutputWarning] = useState<string | null>(null);
 
   const clearSpeakingTimeout = useCallback(() => {
     if (speakingTimeoutRef.current !== null) {
@@ -81,8 +83,14 @@ export function useRealtimeAudioStream({ token }: UseRealtimeAudioStreamArgs) {
     setSpeakingBriefly(message.duration_ms);
     setIsSpeaking(true);
     setTtsError(null);
-    void playPlaceholderBeep(message.duration_ms);
-  }, [setSpeakingBriefly]);
+    void playPlaceholderBeep(message.duration_ms, 0.06, outputDeviceId)
+      .then((result) => {
+        setOutputWarning(result.warning);
+      })
+      .catch(() => {
+        setOutputWarning(null);
+      });
+  }, [outputDeviceId, setSpeakingBriefly]);
 
   const appendTtsAudio = useCallback((message: TtsAudioMessage) => {
     setTtsEvents((current) => [...current, message].slice(-50));
@@ -90,17 +98,19 @@ export function useRealtimeAudioStream({ token }: UseRealtimeAudioStreamArgs) {
     setOutputStatus('speaking');
     setIsSpeaking(true);
     setTtsError(null);
-    void playBase64Audio(message.audio_base64, message.audio_format)
-      .then(() => {
+    void playBase64Audio(message.audio_base64, message.audio_format, outputDeviceId)
+      .then((result) => {
         setOutputStatus('idle');
         setIsSpeaking(false);
+        setOutputWarning(result.warning);
       })
       .catch((error) => {
         setOutputStatus('idle');
         setIsSpeaking(false);
         setTtsError(error instanceof Error ? error.message : 'Audio playback failed.');
+        setOutputWarning(null);
       });
-  }, []);
+  }, [outputDeviceId]);
 
   const resetSessionState = useCallback(() => {
     setLastServerMessage(null);
@@ -117,6 +127,7 @@ export function useRealtimeAudioStream({ token }: UseRealtimeAudioStreamArgs) {
     setLastTranscriptReceived('');
     setRealtimeError(null);
     setTtsError(null);
+    setOutputWarning(null);
     setSttMode('real');
     clearSpeakingTimeout();
     stopAudioPlayback();
@@ -170,6 +181,9 @@ export function useRealtimeAudioStream({ token }: UseRealtimeAudioStreamArgs) {
         }
       },
       onStatusChange: (status) => {
+        if (import.meta.env.DEV) {
+          console.log('WebSocket status:', status);
+        }
         setConnectionStatus(status);
       },
       onError: (message) => {
@@ -180,6 +194,7 @@ export function useRealtimeAudioStream({ token }: UseRealtimeAudioStreamArgs) {
 
     try {
       await serviceRef.current.connect({ token });
+      serviceRef.current.sendPing();
       return true;
     } catch (connectError) {
       const message = connectError instanceof Error ? connectError.message : 'Gagal terhubung ke WebSocket realtime.';
@@ -199,6 +214,10 @@ export function useRealtimeAudioStream({ token }: UseRealtimeAudioStreamArgs) {
   }, [clearSpeakingTimeout]);
 
   const sendAudioSegment = useCallback((payload: RealtimeAudioSegmentPayload) => {
+    if (serviceRef.current.getConnectionStatus() !== 'connected') {
+      return;
+    }
+
     serviceRef.current.sendAudioSegment(payload);
   }, []);
 
@@ -235,6 +254,7 @@ export function useRealtimeAudioStream({ token }: UseRealtimeAudioStreamArgs) {
       lastTranscriptReceived,
       realtimeError,
       ttsError,
+      outputWarning,
     }),
     [
       connect,
@@ -257,6 +277,7 @@ export function useRealtimeAudioStream({ token }: UseRealtimeAudioStreamArgs) {
       lastTranscriptReceived,
       realtimeError,
       ttsError,
+      outputWarning,
     ],
   );
 }

@@ -2,3 +2,9 @@
 .venv/
 __pycache__/
 *.pyc
+apps/desktop/node_modules/
+apps/desktop/dist/
+apps/desktop/release/
+apps/desktop/build/
+apps/desktop/.vite/
+apps/desktop/*.tsbuildinfo

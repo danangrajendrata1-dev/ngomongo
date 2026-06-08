@@ -1,12 +1,23 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
-import { clearAccessToken, clearStoredUser, getAccessToken, getStoredUser, setAccessToken, setStoredUser } from '@/lib/storage';
+import {
+  clearAccessToken,
+  clearStoredUser,
+  clearTokenType,
+  getAccessToken,
+  getStoredUser,
+  getTokenType,
+  setAccessToken,
+  setStoredUser,
+  setTokenType,
+} from '@/lib/storage';
 import * as authService from '@/services/auth.service';
 import type { AuthUser, LoginPayload, RegisterPayload } from '@/types/auth';
 
 type AuthState = {
   user: AuthUser | null;
   token: string | null;
+  tokenType: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   isBootstrapping: boolean;
@@ -29,6 +40,7 @@ async function hydrateUser(token: string): Promise<AuthUser> {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(() => getStoredUser<AuthUser>());
   const [token, setToken] = useState<string | null>(() => getAccessToken());
+  const [tokenType, setTokenTypeState] = useState<string | null>(() => getTokenType());
   const [isLoading, setIsLoading] = useState(true);
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (mounted) {
           setUser(storedUser);
           setToken(null);
+          setTokenTypeState(null);
           setIsLoading(false);
           setIsBootstrapping(false);
         }
@@ -55,14 +68,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (mounted) {
           setUser(me);
           setToken(storedToken);
+          setTokenTypeState(getTokenType());
           setError(null);
         }
       } catch {
         clearAccessToken();
+        clearTokenType();
         clearStoredUser();
         if (mounted) {
           setUser(null);
           setToken(null);
+          setTokenTypeState(null);
           setError('Sesi sudah kedaluwarsa. Silakan login lagi.');
         }
       } finally {
@@ -88,13 +104,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const response = await authService.login(payload);
       setAccessToken(response.access_token);
+      setTokenType(response.token_type);
       setToken(response.access_token);
+      setTokenTypeState(response.token_type);
       const me = await hydrateUser(response.access_token);
       setUser(me);
     } catch (err) {
       setUser(null);
       setToken(null);
+      setTokenTypeState(null);
       clearAccessToken();
+      clearTokenType();
       clearStoredUser();
       setError(err instanceof Error ? err.message : 'Login gagal.');
       throw err;
@@ -115,7 +135,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       setUser(null);
       setToken(null);
+      setTokenTypeState(null);
       clearAccessToken();
+      clearTokenType();
       clearStoredUser();
       setError(err instanceof Error ? err.message : 'Registrasi gagal.');
       throw err;
@@ -129,6 +151,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!currentToken) {
       setUser(null);
       setToken(null);
+      setTokenTypeState(null);
       return;
     }
 
@@ -138,10 +161,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const me = await hydrateUser(currentToken);
       setUser(me);
       setToken(currentToken);
+      setTokenTypeState(getTokenType());
     } catch (err) {
       setUser(null);
       setToken(null);
+      setTokenTypeState(null);
       clearAccessToken();
+      clearTokenType();
       clearStoredUser();
       setError(err instanceof Error ? err.message : 'Sesi tidak valid.');
       throw err;
@@ -153,9 +179,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     await authService.logout();
     clearAccessToken();
+    clearTokenType();
     clearStoredUser();
     setUser(null);
     setToken(null);
+    setTokenTypeState(null);
     setError(null);
   };
 
@@ -163,6 +191,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       user,
       token,
+      tokenType,
       isAuthenticated: Boolean(user && token),
       isLoading,
       isBootstrapping,
@@ -173,7 +202,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       clearError,
     }),
-    [user, token, isLoading, isBootstrapping, error],
+    [user, token, tokenType, isLoading, isBootstrapping, error],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

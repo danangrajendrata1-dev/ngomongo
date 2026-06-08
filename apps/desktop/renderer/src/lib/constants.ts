@@ -32,6 +32,7 @@ export const LANGUAGE_OPTIONS = [
 
 export const STORAGE_KEYS = {
   accessToken: 'ngomongo.accessToken',
+  tokenType: 'ngomongo.tokenType',
   user: 'ngomongo.user',
   desktopDeviceId: 'ngomongo.desktopDeviceId',
   localSettings: 'ngomongo.localSettings',

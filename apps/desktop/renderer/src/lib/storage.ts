@@ -46,6 +46,18 @@ export function clearAccessToken(): void {
   removeStorageValue(STORAGE_KEYS.accessToken);
 }
 
+export function getTokenType(): string | null {
+  return readStorageValue<string | null>(STORAGE_KEYS.tokenType, null);
+}
+
+export function setTokenType(tokenType: string): void {
+  writeStorageValue(STORAGE_KEYS.tokenType, tokenType);
+}
+
+export function clearTokenType(): void {
+  removeStorageValue(STORAGE_KEYS.tokenType);
+}
+
 export function getStoredUser<T>(): T | null {
   return readStorageValue<T | null>(STORAGE_KEYS.user, null);
 }

@@ -10,6 +10,7 @@ const STATUS_LABELS: Record<RealtimeConnectionState, { label: string; tone: 'suc
   ready: { label: 'Ready', tone: 'success' },
   processing: { label: 'Processing', tone: 'warning' },
   paused: { label: 'Paused', tone: 'muted' },
+  connecting: { label: 'Connecting', tone: 'warning' },
   error: { label: 'Error', tone: 'danger' },
 };
 

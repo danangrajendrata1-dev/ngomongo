@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import logging
 from json import JSONDecodeError
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status
 from sqlalchemy.orm import Session
 
+from core.config import get_settings
 from core.database import SessionLocal, get_db
 from core.exceptions import NotFoundError, UnauthorizedError
 from core.security import decode_access_token, oauth2_scheme
@@ -19,6 +21,7 @@ from services.speech_to_text_service import (
     SpeechToTextPayloadError,
     SpeechToTextService,
     SpeechToTextServiceError,
+    SpeechToTextRateLimitError,
 )
 from services.text_to_speech_service import TextToSpeechService
 from services.text_to_speech_service import (
@@ -136,6 +139,15 @@ async def _send_followup_pipeline(
     )
 
 
+async def _send_stt_error(websocket: WebSocket, code: str, message: str) -> None:
+    await websocket.send_json({
+        "type": "error",
+        "code": code,
+        "message": message,
+        "detail": message,
+    })
+
+
 @router.post("/session/start", response_model=TranslationSessionRead, status_code=status.HTTP_201_CREATED)
 def start_session(
     payload: TranslationSessionStart,
@@ -171,6 +183,7 @@ def stop_session(
 
 @router.websocket("/voice")
 async def voice_socket(websocket: WebSocket) -> None:
+    settings = get_settings()
     token = websocket.query_params.get("token")
     if token is None:
         await websocket.accept()
@@ -190,6 +203,7 @@ async def voice_socket(websocket: WebSocket) -> None:
 
     connection_id = f"user:{user_id}"
     await websocket_manager.connect(connection_id, websocket)
+    stt_cooldown_until: datetime | None = None
     try:
         while True:
             message = await websocket.receive_text()
@@ -211,6 +225,23 @@ async def voice_socket(websocket: WebSocket) -> None:
                     "detail": "Payload websocket harus berupa object JSON.",
                 })
                 continue
+
+            message_type = str(payload.get("type") or "")
+            if message_type == "audio_segment" and stt_cooldown_until is not None:
+                now = datetime.now(timezone.utc)
+                if now < stt_cooldown_until:
+                    logger.warning(
+                        "STT cooldown active: chunk_index=%s code=%s",
+                        payload.get("chunk_index", "-"),
+                        "stt_cooldown_active",
+                    )
+                    await _send_stt_error(
+                        websocket,
+                        "stt_cooldown_active",
+                        "STT is temporarily paused due to provider rate limit.",
+                    )
+                    continue
+                stt_cooldown_until = None
 
             response = await realtime_service.handle_message(payload)
             await websocket.send_json(response)
@@ -241,6 +272,20 @@ async def voice_socket(websocket: WebSocket) -> None:
                 source_language, target_language, translation_mode = _get_audio_metadata(payload)
                 try:
                     transcript_event = await speech_to_text_service.process_audio_segment(payload)
+                except SpeechToTextRateLimitError as exc:
+                    stt_cooldown_until = datetime.now(timezone.utc) + timedelta(seconds=settings.stt_rate_limit_cooldown_seconds)
+                    logger.warning(
+                        "STT provider rate limited: chunk_index=%s code=%s cooldown_seconds=%s",
+                        payload.get("chunk_index", "-"),
+                        exc.code,
+                        settings.stt_rate_limit_cooldown_seconds,
+                    )
+                    await _send_stt_error(
+                        websocket,
+                        exc.code,
+                        "STT provider rate limit or quota exceeded. Please check your OpenAI billing/quota or try again later.",
+                    )
+                    continue
                 except SpeechToTextConfigurationError as exc:
                     await websocket.send_json({
                         "type": "error",

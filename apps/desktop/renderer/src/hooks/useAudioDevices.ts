@@ -48,6 +48,7 @@ export function useAudioDevices() {
     }));
 
     let permissionGranted = false;
+    let permissionError: string | null = null;
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -55,6 +56,7 @@ export function useAudioDevices() {
       stream.getTracks().forEach((track) => track.stop());
     } catch {
       permissionGranted = false;
+      permissionError = 'Microphone permission belum diberikan. Device label dan output routing mungkin terbatas sampai akses microphone diizinkan.';
     }
 
     try {
@@ -72,7 +74,7 @@ export function useAudioDevices() {
         outputDevices,
         permissionGranted,
         isLoading: false,
-        error: null,
+        error: permissionError,
       }));
     } catch (error) {
       setState((current) => ({

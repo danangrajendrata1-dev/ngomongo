@@ -25,7 +25,7 @@ export function OutputDeviceSelector({
         id="output-selector"
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        disabled={disabled || !supportsOutputSelection}
+        disabled={disabled}
       >
         <option value="">Pilih output device</option>
         {devices.map((device) => (
@@ -39,8 +39,8 @@ export function OutputDeviceSelector({
       </Select>
       <p className="field-group__hint">
         {supportsOutputSelection
-          ? 'Output device dapat dipilih saat environment mendukung.'
-          : 'Environment ini belum mendukung pemilihan output device secara penuh.'}
+          ? 'Output device dapat dipilih saat environment mendukung routing audio.'
+          : 'Output device tetap bisa dipilih, tetapi playback mungkin fallback ke default output di environment ini.'}
       </p>
     </div>
   );

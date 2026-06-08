@@ -15,6 +15,29 @@ class OpenAISTTProviderError(RuntimeError):
     pass
 
 
+class OpenAISTTRateLimitError(OpenAISTTProviderError):
+    code = "STT_RATE_LIMITED"
+
+
+def _is_rate_limit_error(exc: BaseException) -> bool:
+    current: BaseException | None = exc
+    visited: set[int] = set()
+
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        status_code = getattr(current, "status_code", None)
+        if status_code == 429:
+            return True
+
+        response = getattr(current, "response", None)
+        if getattr(response, "status_code", None) == 429 or getattr(response, "status", None) == 429:
+            return True
+
+        current = current.__cause__ or current.__context__
+
+    return False
+
+
 class OpenAISTTProvider(SpeechToTextProvider):
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -47,7 +70,7 @@ class OpenAISTTProvider(SpeechToTextProvider):
             ) from exc
 
         def _transcribe() -> str:
-            client = OpenAI(api_key=self.settings.openai_api_key)
+            client = OpenAI(api_key=self.settings.openai_api_key, max_retries=0)
             audio_file = BytesIO(audio_bytes)
             audio_file.name = filename
 
@@ -69,6 +92,10 @@ class OpenAISTTProvider(SpeechToTextProvider):
         except OpenAISTTProviderConfigurationError:
             raise
         except Exception as exc:  # noqa: BLE001
+            if _is_rate_limit_error(exc):
+                raise OpenAISTTRateLimitError(
+                    "STT provider rate limit or quota exceeded. Please check your OpenAI billing/quota or try again later."
+                ) from exc
             raise OpenAISTTProviderError(
                 "Speech-to-text provider failed to transcribe the audio segment."
             ) from exc

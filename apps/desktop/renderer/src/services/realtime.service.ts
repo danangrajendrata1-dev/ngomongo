@@ -1,4 +1,3 @@
-import { WS_URL } from '@/lib/constants';
 import type {
   RealtimeAudioChunkPayload,
   RealtimeAudioSegmentPayload,
@@ -16,12 +15,19 @@ type ConnectOptions = {
   token: string;
 };
 
+function getRealtimeBaseUrl(): string {
+  return import.meta.env.VITE_WS_URL?.trim() || 'ws://127.0.0.1:8000';
+}
+
+function getRealtimeEndpoint(): string {
+  const baseUrl = getRealtimeBaseUrl();
+  return baseUrl.endsWith('/realtime/voice')
+    ? baseUrl
+    : `${baseUrl.replace(/\/+$/, '')}/realtime/voice`;
+}
+
 function getRealtimeUrl(token: string): string {
-  const baseUrl = WS_URL.trim();
-  const fallbackUrl = 'ws://localhost:8000';
-  const normalizedBase = baseUrl || fallbackUrl;
-  const endpoint = normalizedBase.endsWith('/realtime/voice') ? normalizedBase : `${normalizedBase.replace(/\/+$/, '')}/realtime/voice`;
-  const url = new URL(endpoint);
+  const url = new URL(getRealtimeEndpoint());
   url.searchParams.set('token', token);
   return url.toString();
 }
@@ -59,6 +65,10 @@ export class RealtimeService {
     await this.disconnect();
 
     this.emitStatus('connecting');
+
+    if (import.meta.env.DEV) {
+      console.log('NGOMONGO WS URL:', getRealtimeEndpoint());
+    }
 
     const socket = new WebSocket(getRealtimeUrl(token));
     this.socket = socket;
@@ -150,7 +160,6 @@ export class RealtimeService {
 
   private sendJson(payload: Record<string, unknown>): void {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-      this.emitError('WebSocket belum terhubung.');
       return;
     }
 

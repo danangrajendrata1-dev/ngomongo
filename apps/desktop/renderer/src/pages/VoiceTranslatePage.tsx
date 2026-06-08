@@ -28,6 +28,7 @@ export function VoiceTranslatePage() {
   const microphone = useMicrophoneCapture();
   const realtime = useRealtimeAudioStream({
     token: auth.token,
+    outputDeviceId: settings.selected_output_device_id,
   });
   const sourceLanguageCode = settings.source_language === 'English' ? 'en' : 'id';
   const targetLanguageCode = settings.target_language === 'English' ? 'en' : 'id';
@@ -80,6 +81,10 @@ export function VoiceTranslatePage() {
       return 'error';
     }
 
+    if (realtime.connectionStatus === 'connecting') {
+      return 'connecting';
+    }
+
     if (captureStatus === 'paused') {
       return 'paused';
     }
@@ -93,9 +98,13 @@ export function VoiceTranslatePage() {
     }
 
     return 'ready';
-  }, [captureStatus, realtime.outputStatus, realtime.realtimeError, realtime.transcriptEvents.length, realtime.translationEvents.length, realtime.ttsEvents.length]);
+  }, [captureStatus, realtime.connectionStatus, realtime.outputStatus, realtime.realtimeError, realtime.transcriptEvents.length, realtime.translationEvents.length, realtime.ttsEvents.length]);
 
   const statusLabel = useMemo(() => {
+    if (realtime.connectionStatus === 'connecting') {
+      return 'Menghubungkan WebSocket...';
+    }
+
     if (captureStatus === 'error') {
       return statusMessage;
     }
@@ -121,7 +130,7 @@ export function VoiceTranslatePage() {
     }
 
     return 'Ready';
-  }, [captureStatus, realtime.outputStatus, realtime.realtimeError, realtime.transcriptEvents.length, realtime.translationEvents.length, realtime.ttsEvents.length, statusMessage]);
+  }, [captureStatus, realtime.connectionStatus, realtime.outputStatus, realtime.realtimeError, realtime.transcriptEvents.length, realtime.translationEvents.length, realtime.ttsEvents.length, statusMessage]);
 
   const handleStart = async () => {
     await realtime.disconnect();
@@ -303,6 +312,7 @@ export function VoiceTranslatePage() {
           </div>
           <p className="text-muted">{providerMessage}</p>
           <p className={realtime.ttsError ? 'text-danger' : 'text-muted'}>{realtime.ttsError ?? ttsMessage}</p>
+          {realtime.outputWarning ? <p className="text-muted">{realtime.outputWarning}</p> : null}
           <p className={segmentRecorder.error || realtime.realtimeError ? 'text-danger' : 'text-muted'}>
             {segmentRecorder.error ?? realtime.realtimeError ?? lastAckMessage}
           </p>

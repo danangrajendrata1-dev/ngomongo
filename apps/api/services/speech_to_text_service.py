@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 from typing import Any
 
 from core.config import get_settings
@@ -8,6 +9,7 @@ from providers.openai_stt_provider import (
     OpenAISTTProvider,
     OpenAISTTProviderConfigurationError,
     OpenAISTTProviderError,
+    OpenAISTTRateLimitError,
 )
 from providers.provider_interface import SpeechToTextProvider
 
@@ -22,6 +24,13 @@ class SpeechToTextConfigurationError(SpeechToTextServiceError):
 
 class SpeechToTextPayloadError(SpeechToTextServiceError):
     code = "INVALID_AUDIO_PAYLOAD"
+
+
+class SpeechToTextRateLimitError(SpeechToTextServiceError):
+    code = "stt_rate_limited"
+
+
+logger = logging.getLogger(__name__)
 
 
 class SpeechToTextService:
@@ -61,30 +70,58 @@ class SpeechToTextService:
         language = str(payload.get("source_language") or "id")
         filename = str(payload.get("filename") or f"segment-{chunk_index}.webm")
         content_type = str(payload.get("content_type") or "audio/webm")
-        use_placeholder = bool(payload.get("use_placeholder"))
+        settings = get_settings()
+        use_placeholder = settings.use_stt_placeholder or bool(payload.get("use_placeholder"))
 
         if use_placeholder:
-            transcript_text = self.generate_placeholder_transcript(chunk_index)
-        else:
-            audio_base64 = payload.get("audio_base64")
-            if not isinstance(audio_base64, str):
-                raise SpeechToTextPayloadError("audio_base64 is required for audio_segment messages.")
+            logger.info(
+                "STT provider status=placeholder chunk_index=%s",
+                chunk_index,
+            )
+            return {
+                "type": "transcript_final",
+                "chunk_index": chunk_index,
+                "text": self.generate_placeholder_transcript(chunk_index),
+                "language": language,
+                "is_final": True,
+            }
 
-            audio_bytes = self.decode_audio_base64(audio_base64)
+        audio_base64 = payload.get("audio_base64")
+        if not isinstance(audio_base64, str):
+            raise SpeechToTextPayloadError("audio_base64 is required for audio_segment messages.")
 
-            try:
-                transcript_text = await self.provider.transcribe_audio(
-                    audio_bytes=audio_bytes,
-                    filename=filename,
-                    content_type=content_type,
-                    language=language,
-                )
-            except OpenAISTTProviderConfigurationError as exc:
-                raise SpeechToTextConfigurationError(str(exc)) from exc
-            except OpenAISTTProviderError as exc:
-                raise SpeechToTextServiceError(
-                    "Speech-to-text provider failed to process the audio segment."
-                ) from exc
+        audio_bytes = self.decode_audio_base64(audio_base64)
+
+        try:
+            transcript_text = await self.provider.transcribe_audio(
+                audio_bytes=audio_bytes,
+                filename=filename,
+                content_type=content_type,
+                language=language,
+            )
+        except OpenAISTTRateLimitError as exc:
+            logger.warning(
+                "STT provider status=rate_limited chunk_index=%s code=%s",
+                chunk_index,
+                SpeechToTextRateLimitError.code,
+            )
+            raise SpeechToTextRateLimitError(str(exc)) from exc
+        except OpenAISTTProviderConfigurationError as exc:
+            raise SpeechToTextConfigurationError(str(exc)) from exc
+        except OpenAISTTProviderError as exc:
+            logger.warning(
+                "STT provider status=error chunk_index=%s code=%s",
+                chunk_index,
+                SpeechToTextServiceError.code,
+            )
+            raise SpeechToTextServiceError(
+                "Speech-to-text provider failed to process the audio segment."
+            ) from exc
+
+        logger.info(
+            "STT provider status=success chunk_index=%s",
+            chunk_index,
+        )
 
         return {
             "type": "transcript_final",

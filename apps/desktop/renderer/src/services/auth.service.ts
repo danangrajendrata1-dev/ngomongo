@@ -1,22 +1,37 @@
-import { requestJson } from '@/services/api';
+import { buildApiUrl, requestJson } from '@/services/api';
 import type { AuthUser, LoginPayload, LoginResponse, RegisterPayload } from '@/types/auth';
 
 export async function register(payload: RegisterPayload): Promise<AuthUser> {
-  return requestJson<AuthUser>('/auth/register', {
+  if (import.meta.env.DEV) {
+    console.log('[auth.register]', {
+      name: payload.name,
+      email: payload.email,
+    });
+  }
+
+  return requestJson<AuthUser>(buildApiUrl('/auth/register'), {
     method: 'POST',
     body: payload,
   });
 }
 
 export async function login(payload: LoginPayload): Promise<LoginResponse> {
-  return requestJson<LoginResponse>('/auth/login', {
+  const formData = new URLSearchParams();
+  formData.append('username', payload.email);
+  formData.append('password', payload.password);
+
+  return requestJson<LoginResponse>(buildApiUrl('/auth/login'), {
     method: 'POST',
-    body: payload,
+    bodyType: 'form',
+    body: formData,
+    errorMessages: {
+      unprocessable: 'Format login tidak sesuai.',
+    },
   });
 }
 
 export async function getMe(token?: string): Promise<AuthUser> {
-  return requestJson<AuthUser>('/auth/me', {
+  return requestJson<AuthUser>(buildApiUrl('/auth/me'), {
     method: 'GET',
     token,
   });

@@ -7,6 +7,7 @@ import { OutputDeviceSelector } from '@/components/audio/OutputDeviceSelector';
 import { DeviceStatus } from '@/components/audio/DeviceStatus';
 import { useAudioDevices } from '@/hooks/useAudioDevices';
 import { useLocalSettings } from '@/hooks/useLocalSettings';
+import { playTestTone } from '@/lib/audioPlayback';
 import { useAuth } from '@/stores/authStore';
 import { buildBackendSettingsPayload, getDesktopSettings, updateDesktopSettings } from '@/services/desktop.service';
 import type { LocalSettings } from '@/types/settings';
@@ -17,6 +18,7 @@ export function DeviceSetupPage() {
   const audioDevices = useAudioDevices();
   const [form, setForm] = useState<LocalSettings>(settings);
   const [statusMessage, setStatusMessage] = useState('Siap menyimpan setting lokal.');
+  const [outputWarning, setOutputWarning] = useState<string | null>(null);
   const syncedTokenRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -120,6 +122,17 @@ export function DeviceSetupPage() {
     setStatusMessage('Setting berhasil disimpan ke localStorage.');
   };
 
+  const handleTestOutput = async () => {
+    try {
+      const result = await playTestTone(form.selected_output_device_id || undefined);
+      setOutputWarning(result.warning);
+      setStatusMessage(result.warning ?? 'Test output berhasil diputar.');
+    } catch (error) {
+      setOutputWarning(null);
+      setStatusMessage(error instanceof Error ? error.message : 'Gagal memutar test output.');
+    }
+  };
+
   return (
     <div className="page-grid page-grid--twoColumn">
       <Card
@@ -159,7 +172,9 @@ export function DeviceSetupPage() {
             </Button>
             <Button
               variant="secondary"
-              onClick={() => setStatusMessage('Test Output placeholder: belum ada audio routing.')}
+              onClick={() => {
+                void handleTestOutput();
+              }}
             >
               Test Output
             </Button>
@@ -167,6 +182,10 @@ export function DeviceSetupPage() {
           </div>
 
           <p className="text-muted">{statusMessage}</p>
+          {outputWarning ? <p className="text-muted">{outputWarning}</p> : null}
+          <p className="text-muted">
+            To send translated voice into Discord, install VB-CABLE, select CABLE Input as NGOMONGO output, then select CABLE Output as Discord input.
+          </p>
 
           {audioDevices.error ? <p className="text-danger">{audioDevices.error}</p> : null}
         </div>

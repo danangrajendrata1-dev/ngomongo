@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(default_factory=list, alias="CORS_ORIGINS")
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     openai_stt_model: str | None = Field(default=None, alias="OPENAI_STT_MODEL")
+    use_stt_placeholder: bool = Field(default=False, alias="USE_STT_PLACEHOLDER")
+    stt_rate_limit_cooldown_seconds: int = Field(default=60, alias="STT_RATE_LIMIT_COOLDOWN_SECONDS")
     openai_translation_model: str | None = Field(default=None, alias="OPENAI_TRANSLATION_MODEL")
     use_translation_placeholder: bool = Field(default=False, alias="USE_TRANSLATION_PLACEHOLDER")
     openai_tts_model: str | None = Field(default=None, alias="OPENAI_TTS_MODEL")

@@ -2,7 +2,7 @@ export type TranslationLanguage = 'Indonesian' | 'English';
 
 export type TranslationMode = 'Interview' | 'Meeting' | 'Discord' | 'Game' | 'Casual';
 
-export type RealtimeConnectionState = 'idle' | 'ready' | 'processing' | 'paused' | 'error';
+export type RealtimeConnectionState = 'idle' | 'ready' | 'processing' | 'paused' | 'connecting' | 'error';
 
 export type TranscriptMessage = {
   id: string;

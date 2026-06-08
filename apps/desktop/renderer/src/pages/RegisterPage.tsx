@@ -26,6 +26,11 @@ export function RegisterPage({ isLoading, error, onRegister, onGoToLogin, onClea
     onClearError();
     setLocalError(null);
 
+    if (form.password.length < 8) {
+      setLocalError('Password minimal 8 karakter.');
+      return;
+    }
+
     if (form.password !== confirmPassword) {
       setLocalError('Password dan konfirmasi password harus sama.');
       return;
@@ -81,6 +86,7 @@ export function RegisterPage({ isLoading, error, onRegister, onGoToLogin, onClea
               value={form.password}
               onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))}
               autoComplete="new-password"
+              minLength={8}
               required
             />
           </label>
